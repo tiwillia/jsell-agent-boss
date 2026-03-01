@@ -44,15 +44,20 @@ func (s AgentStatus) Emoji() string {
 type AgentUpdate struct {
 	Status    AgentStatus `json:"status"`
 	Summary   string      `json:"summary"`
-	Phase     string      `json:"phase,omitempty"`
+	Branch   string      `json:"branch,omitempty"`
+	Worktree string      `json:"worktree,omitempty"`
+	PR       string      `json:"pr,omitempty"`
+	Phase    string      `json:"phase,omitempty"`
 	TestCount *int        `json:"test_count,omitempty"`
 	Items     []string    `json:"items,omitempty"`
 	Sections  []Section   `json:"sections,omitempty"`
 	Questions []string    `json:"questions,omitempty"`
 	Blockers  []string    `json:"blockers,omitempty"`
-	NextSteps string      `json:"next_steps,omitempty"`
-	FreeText  string      `json:"free_text,omitempty"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	NextSteps    string      `json:"next_steps,omitempty"`
+	FreeText     string      `json:"free_text,omitempty"`
+	TmuxSession  string      `json:"tmux_session,omitempty"`
+	RepoURL      string      `json:"repo_url,omitempty"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 type Section struct {
@@ -97,8 +102,8 @@ func (ks *KnowledgeSpace) RenderMarkdownWithStaleness(staleThreshold time.Durati
 	b.WriteString("\n\n")
 
 	b.WriteString("## Session Dashboard\n\n")
-	b.WriteString("| **Session** | **Status** | **Phase** | **Tests** | **Summary** |\n")
-	b.WriteString("| ----------- | ---------- | --------- | --------- | ----------- |\n")
+	b.WriteString("| **Agent** | **Status** | **Branch** | **PR** |\n")
+	b.WriteString("| --------- | ---------- | ---------- | ------ |\n")
 
 	sortedNames := make([]string, 0, len(ks.Agents))
 	for name := range ks.Agents {
@@ -108,13 +113,13 @@ func (ks *KnowledgeSpace) RenderMarkdownWithStaleness(staleThreshold time.Durati
 
 	for _, name := range sortedNames {
 		agent := ks.Agents[name]
-		phase := agent.Phase
-		if phase == "" {
-			phase = "—"
+		branch := agent.Branch
+		if branch == "" {
+			branch = "—"
 		}
-		tests := "—"
-		if agent.TestCount != nil {
-			tests = fmt.Sprintf("%d", *agent.TestCount)
+		pr := agent.PR
+		if pr == "" {
+			pr = "—"
 		}
 		staleMarker := ""
 		if staleThreshold > 0 && agent.Status != StatusDone && agent.Status != StatusError {
@@ -122,8 +127,8 @@ func (ks *KnowledgeSpace) RenderMarkdownWithStaleness(staleThreshold time.Durati
 				staleMarker = " ⚠️ STALE"
 			}
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s %s%s | %s | %s | %s |\n",
-			name, agent.Status.Emoji(), agent.Status, staleMarker, phase, tests, agent.Summary))
+		b.WriteString(fmt.Sprintf("| %s | %s %s%s | %s | %s |\n",
+			name, agent.Status.Emoji(), agent.Status, staleMarker, branch, pr))
 	}
 	b.WriteString("\n---\n\n")
 

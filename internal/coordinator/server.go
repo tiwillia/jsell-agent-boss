@@ -208,12 +208,34 @@ func (s *Server) loadSpace(name string) (*KnowledgeSpace, error) {
 	return &ks, nil
 }
 
+const maxBackups = 10
+
+func (s *Server) rotateBackups(spaceName string) {
+	backupDir := filepath.Join(s.dataDir, "backups")
+	os.MkdirAll(backupDir, 0755)
+
+	base := filepath.Join(backupDir, spaceName+".json")
+	for i := maxBackups; i > 1; i-- {
+		src := fmt.Sprintf("%s.%d", base, i-1)
+		dst := fmt.Sprintf("%s.%d", base, i)
+		os.Rename(src, dst)
+	}
+
+	src := s.spacePath(spaceName)
+	dst := fmt.Sprintf("%s.%d", base, 1)
+	data, err := os.ReadFile(src)
+	if err == nil {
+		os.WriteFile(dst, data, 0644)
+	}
+}
+
 func (s *Server) saveSpace(ks *KnowledgeSpace) error {
 	s.refreshProtocol(ks)
 	data, err := json.MarshalIndent(ks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", ks.Name, err)
 	}
+	s.rotateBackups(ks.Name)
 	if err := os.WriteFile(s.spacePath(ks.Name), data, 0644); err != nil {
 		return err
 	}
@@ -346,10 +368,39 @@ func (s *Server) handleSpaceRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		s.handleSpaceAgent(w, r, spaceName, agentName)
 	case "api":
-		if len(parts) == 3 && strings.TrimRight(parts[2], "/") == "agents" {
-			s.handleSpaceAgentsJSON(w, r, spaceName)
+		if len(parts) == 3 {
+			switch strings.TrimRight(parts[2], "/") {
+			case "agents":
+				s.handleSpaceAgentsJSON(w, r, spaceName)
+			case "events":
+				s.handleSpaceEventsJSON(w, r)
+			case "tmux-status":
+				s.handleSpaceTmuxStatus(w, r, spaceName)
+			default:
+				http.NotFound(w, r)
+			}
 		} else {
 			http.NotFound(w, r)
+		}
+	case "ignition":
+		agentName := ""
+		if len(parts) == 3 {
+			agentName = strings.TrimRight(parts[2], "/")
+		}
+		s.handleIgnition(w, r, spaceName, agentName)
+	case "approve":
+		if len(parts) == 3 {
+			agentName := strings.TrimRight(parts[2], "/")
+			s.handleApproveAgent(w, r, spaceName, agentName)
+		} else {
+			http.Error(w, "agent name required", http.StatusBadRequest)
+		}
+	case "broadcast":
+		if len(parts) == 3 {
+			agentName := strings.TrimRight(parts[2], "/")
+			s.handleSingleBroadcast(w, r, spaceName, agentName)
+		} else {
+			s.handleBroadcast(w, r, spaceName)
 		}
 	default:
 		http.NotFound(w, r)
@@ -545,6 +596,16 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 		json.NewEncoder(w).Encode(agent)
 
 	case http.MethodPost:
+		callerName := r.Header.Get("X-Agent-Name")
+		if callerName == "" {
+			http.Error(w, "missing X-Agent-Name header: agents must identify themselves", http.StatusBadRequest)
+			return
+		}
+		if !strings.EqualFold(callerName, agentName) {
+			http.Error(w, fmt.Sprintf("agent %q cannot post to %q's channel", callerName, agentName), http.StatusForbidden)
+			return
+		}
+
 		ks := s.getOrCreateSpace(spaceName)
 		canonical := resolveAgentName(ks, agentName)
 
@@ -581,6 +642,14 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 		update.UpdatedAt = time.Now().UTC()
 
 		s.mu.Lock()
+		if existing, ok := ks.Agents[canonical]; ok {
+			if update.TmuxSession == "" && existing.TmuxSession != "" {
+				update.TmuxSession = existing.TmuxSession
+			}
+			if update.RepoURL == "" && existing.RepoURL != "" {
+				update.RepoURL = existing.RepoURL
+			}
+		}
 		ks.Agents[canonical] = &update
 		ks.UpdatedAt = time.Now().UTC()
 		if err := s.saveSpace(ks); err != nil {
@@ -623,6 +692,169 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 	}
 }
 
+func (s *Server) handleIgnition(w http.ResponseWriter, r *http.Request, spaceName, agentName string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if agentName == "" {
+		http.Error(w, "missing agent name: GET /spaces/{space}/ignition/{agent}", http.StatusBadRequest)
+		return
+	}
+
+	tmuxSession := r.URL.Query().Get("tmux_session")
+
+	ks := s.getOrCreateSpace(spaceName)
+
+	if tmuxSession != "" {
+		s.mu.Lock()
+		canonical := resolveAgentName(ks, agentName)
+		if existing, ok := ks.Agents[canonical]; ok {
+			existing.TmuxSession = tmuxSession
+		} else {
+			ks.Agents[canonical] = &AgentUpdate{
+				Status:      StatusIdle,
+				Summary:     canonical + ": awaiting ignition",
+				TmuxSession: tmuxSession,
+				UpdatedAt:   time.Now().UTC(),
+			}
+		}
+		ks.UpdatedAt = time.Now().UTC()
+		s.saveSpace(ks)
+		s.mu.Unlock()
+		s.logEvent(fmt.Sprintf("[%s/%s] tmux session registered via ignition: %s", spaceName, agentName, tmuxSession))
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("# Agent Ignition: %s\n\n", agentName))
+	b.WriteString(fmt.Sprintf("You are **%s**, an agent working in workspace **%s**.\n\n", agentName, spaceName))
+
+	b.WriteString("## Coordinator\n\n")
+	b.WriteString(fmt.Sprintf("- Boss URL: `http://localhost%s`\n", s.port))
+	b.WriteString(fmt.Sprintf("- Workspace: `%s`\n", spaceName))
+	b.WriteString(fmt.Sprintf("- Your channel: `POST /spaces/%s/agent/%s`\n", spaceName, agentName))
+	b.WriteString(fmt.Sprintf("- Read blackboard: `GET /spaces/%s/raw`\n", spaceName))
+	b.WriteString(fmt.Sprintf("- Dashboard: `http://localhost%s/spaces/%s/`\n", s.port, spaceName))
+	if tmuxSession != "" {
+		b.WriteString(fmt.Sprintf("- Tmux session: `%s` (pre-registered)\n", tmuxSession))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Protocol\n\n")
+	b.WriteString("1. **Read before write.** GET /raw first to see what others are doing.\n")
+	b.WriteString(fmt.Sprintf("2. **Post to your channel only.** POST to `/spaces/%s/agent/%s` with `-H 'X-Agent-Name: %s'`.\n", spaceName, agentName, agentName))
+	b.WriteString("3. **Tag questions** with `[?BOSS]` — they render highlighted in the dashboard.\n")
+	b.WriteString("4. **Include location fields** in every POST: `branch`, `pr`, `test_count`.\n")
+	if tmuxSession != "" {
+		b.WriteString(fmt.Sprintf("5. **Tmux session is pre-registered.** Your session `%s` is already known to the coordinator. It is sticky — you do not need to include `tmux_session` in your POSTs.\n", tmuxSession))
+	} else {
+		b.WriteString("5. **Register your tmux session.** Include `\"tmux_session\"` in your first POST. Find it with `tmux display-message -p '#S'`. It is sticky — you only need to send it once.\n")
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Peer Agents\n\n")
+	if len(ks.Agents) == 0 {
+		b.WriteString("No agents have posted yet.\n\n")
+	} else {
+		b.WriteString("| Agent | Status | Summary |\n")
+		b.WriteString("| ----- | ------ | ------- |\n")
+		for name, agent := range ks.Agents {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n", name, agent.Status, agent.Summary))
+		}
+		b.WriteString("\n")
+	}
+
+	canonical := resolveAgentName(ks, agentName)
+	existing, hasExisting := ks.Agents[canonical]
+	if hasExisting {
+		b.WriteString("## Your Last State\n\n")
+		b.WriteString(fmt.Sprintf("- Status: %s\n", existing.Status))
+		b.WriteString(fmt.Sprintf("- Summary: %s\n", existing.Summary))
+		if existing.Branch != "" {
+			b.WriteString(fmt.Sprintf("- Branch: `%s`\n", existing.Branch))
+		}
+		if existing.PR != "" {
+			b.WriteString(fmt.Sprintf("- PR: %s\n", existing.PR))
+		}
+		if existing.Phase != "" {
+			b.WriteString(fmt.Sprintf("- Phase: %s\n", existing.Phase))
+		}
+		if existing.NextSteps != "" {
+			b.WriteString(fmt.Sprintf("- Next steps: %s\n", existing.NextSteps))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## JSON Post Template\n\n")
+	b.WriteString("```bash\n")
+	b.WriteString(fmt.Sprintf("curl -s -X POST http://localhost%s/spaces/%s/agent/%s \\\n", s.port, spaceName, agentName))
+	b.WriteString("  -H 'Content-Type: application/json' \\\n")
+	b.WriteString(fmt.Sprintf("  -H 'X-Agent-Name: %s' \\\n", agentName))
+	b.WriteString("  -d '{\n")
+	b.WriteString("    \"status\": \"active\",\n")
+	b.WriteString(fmt.Sprintf("    \"summary\": \"%s: working on ...\",\n", agentName))
+	b.WriteString("    \"branch\": \"feat/...\",\n")
+	b.WriteString("    \"items\": [\"...\"]\n")
+	b.WriteString("  }'\n")
+	b.WriteString("```\n")
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprint(w, b.String())
+}
+
+func (s *Server) handleBroadcast(w http.ResponseWriter, r *http.Request, spaceName string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	checkModel := r.URL.Query().Get("check_model")
+	if checkModel == "" {
+		checkModel = "claude-3-5-haiku@20241022"
+	}
+	workModel := r.URL.Query().Get("work_model")
+	if workModel == "" {
+		workModel = "claude-opus-4-6@default"
+	}
+
+	go func() {
+		result := s.BroadcastCheckIn(spaceName, checkModel, workModel)
+		sseData, _ := json.Marshal(result)
+		s.broadcastSSE(spaceName, "broadcast_complete", string(sseData))
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	fmt.Fprintf(w, "broadcast initiated for space %q", spaceName)
+}
+
+func (s *Server) handleSingleBroadcast(w http.ResponseWriter, r *http.Request, spaceName, agentName string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	checkModel := r.URL.Query().Get("check_model")
+	if checkModel == "" {
+		checkModel = "claude-3-5-haiku@20241022"
+	}
+	workModel := r.URL.Query().Get("work_model")
+	if workModel == "" {
+		workModel = "claude-opus-4-6@default"
+	}
+
+	go func() {
+		result := s.SingleAgentCheckIn(spaceName, agentName, checkModel, workModel)
+		sseData, _ := json.Marshal(result)
+		s.broadcastSSE(spaceName, "broadcast_complete", string(sseData))
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	fmt.Fprintf(w, "check-in initiated for agent %q in space %q", agentName, spaceName)
+}
+
 func (s *Server) handleSpaceAgentsJSON(w http.ResponseWriter, r *http.Request, spaceName string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -637,6 +869,125 @@ func (s *Server) handleSpaceAgentsJSON(w http.ResponseWriter, r *http.Request, s
 	defer s.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ks.Agents)
+}
+
+func (s *Server) handleSpaceEventsJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	events := s.RecentEvents(50)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(events)
+}
+
+type tmuxAgentStatus struct {
+	Agent         string `json:"agent"`
+	Session       string `json:"session"`
+	Registered    bool   `json:"registered"`
+	Exists        bool   `json:"exists"`
+	Idle          bool   `json:"idle"`
+	LastLine      string `json:"last_line,omitempty"`
+	NeedsApproval bool   `json:"needs_approval"`
+	ToolName      string `json:"tool_name,omitempty"`
+	PromptText    string `json:"prompt_text,omitempty"`
+}
+
+func (s *Server) handleSpaceTmuxStatus(w http.ResponseWriter, r *http.Request, spaceName string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ks, ok := s.getSpace(spaceName)
+	if !ok {
+		http.Error(w, fmt.Sprintf("space %q not found", spaceName), http.StatusNotFound)
+		return
+	}
+
+	s.TmuxAutoDiscover(spaceName)
+
+	s.mu.RLock()
+	type agentSession struct {
+		name    string
+		session string
+	}
+	var pairs []agentSession
+	for name, agent := range ks.Agents {
+		pairs = append(pairs, agentSession{name: name, session: agent.TmuxSession})
+	}
+	s.mu.RUnlock()
+
+	hasTmux := tmuxAvailable()
+	var results []tmuxAgentStatus
+	for i, p := range pairs {
+		st := tmuxAgentStatus{
+			Agent:      p.name,
+			Session:    p.session,
+			Registered: p.session != "",
+		}
+		if hasTmux && st.Registered {
+			st.Exists = tmuxSessionExists(p.session)
+			if st.Exists {
+				st.Idle = tmuxIsIdle(p.session)
+				st.LastLine, _ = tmuxCapturePaneLastLine(p.session)
+				approval := tmuxCheckApproval(p.session)
+				st.NeedsApproval = approval.NeedsApproval
+				st.ToolName = approval.ToolName
+				st.PromptText = approval.PromptText
+			}
+		}
+		results = append(results, st)
+		if hasTmux && i < len(pairs)-1 {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleApproveAgent(w http.ResponseWriter, r *http.Request, spaceName, agentName string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ks, ok := s.getSpace(spaceName)
+	if !ok {
+		http.Error(w, fmt.Sprintf("space %q not found", spaceName), http.StatusNotFound)
+		return
+	}
+	s.mu.RLock()
+	canonical := resolveAgentName(ks, agentName)
+	agent, exists := ks.Agents[canonical]
+	var tmuxSession string
+	if exists {
+		tmuxSession = agent.TmuxSession
+	}
+	s.mu.RUnlock()
+	if !exists {
+		http.Error(w, "agent not found: "+agentName, http.StatusNotFound)
+		return
+	}
+	if tmuxSession == "" {
+		http.Error(w, canonical+": no tmux session registered", http.StatusBadRequest)
+		return
+	}
+	if !tmuxSessionExists(tmuxSession) {
+		http.Error(w, canonical+": tmux session not found", http.StatusBadRequest)
+		return
+	}
+	approval := tmuxCheckApproval(tmuxSession)
+	if !approval.NeedsApproval {
+		http.Error(w, canonical+": not waiting for approval", http.StatusConflict)
+		return
+	}
+	if err := tmuxApprove(tmuxSession); err != nil {
+		http.Error(w, canonical+": approve failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logEvent(fmt.Sprintf("[%s/%s] approval granted via dashboard (tool: %s)", spaceName, canonical, approval.ToolName))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "approved", "agent": canonical, "tool": approval.ToolName})
 }
 
 func (s *Server) broadcastSSE(space, event, data string) {

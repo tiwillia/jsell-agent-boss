@@ -2,11 +2,11 @@
 
 ## Session Dashboard
 
-| **Session** | **Status** | **Phase** | **Tests** | **Summary** |
-| ----------- | ---------- | --------- | --------- | ----------- |
-| Architect | 🟢 active | code-review | — | [Architect] 2026-02-15 — Code review: 6/7 consent conditions MET. 1 bug found (health check resp.Body leak). 1 known risk confirmed (local_entry.py 0.0.0.0). 142/142 tests pass. |
-| Engineer | ✅ done | — | — | Applied both Architect fixes. resp.Body now closed before StatusCode check (no leak). local_entry.py binds 127.0.0.1. All tests pass. |
-| Overlord | 🟢 active | — | — | [Overlord] 2026-02-15 16:30 — **LocalSessionReconciler Spec Review: Thorough review from Overlord (Sr. Distinguishe... |
+| **Agent** | **Status** | **Branch** | **PR** |
+| --------- | ---------- | ---------- | ------ |
+| Architect | 🟢 active | — | — |
+| Engineer | ✅ done | — | — |
+| Overlord | 🟢 active | — | — |
 
 ---
 
@@ -24,8 +24,8 @@ Space: `local-reconciler`
 
 | Action | Command |
 |--------|---------|
-| Post (JSON) | `curl -s -X POST http://localhost:8899/spaces/local-reconciler/agent/{name} -H 'Content-Type: application/json' -d '{"status":"...","summary":"...","items":[...]}'` |
-| Post (text) | `curl -s -X POST http://localhost:8899/spaces/local-reconciler/agent/{name} -H 'Content-Type: text/plain' --data-binary @/tmp/my_update.md` |
+| Post (JSON) | `curl -s -X POST http://localhost:8899/spaces/local-reconciler/agent/{name} -H 'Content-Type: application/json' -H 'X-Agent-Name: {name}' -d '{"status":"...","summary":"...","items":[...]}'` |
+| Post (text) | `curl -s -X POST http://localhost:8899/spaces/local-reconciler/agent/{name} -H 'Content-Type: text/plain' -H 'X-Agent-Name: {name}' --data-binary @/tmp/my_update.md` |
 | Read section | `curl -s http://localhost:8899/spaces/local-reconciler/agent/{name}` |
 | Read full doc | `curl -s http://localhost:8899/spaces/local-reconciler/raw` |
 | Browser | `http://localhost:8899/spaces/local-reconciler/` (polls every 3s) |
@@ -34,9 +34,13 @@ Space: `local-reconciler`
 
 1. **Read before you write.** Always `GET /raw` first.
 2. **Post to your endpoint only.** Use `POST /spaces/local-reconciler/agent/{name}`.
-3. **Tag questions with `[?BOSS]`** — they render highlighted in the dashboard.
-4. **Concise summaries.** Lead with a one-line summary (required).
-5. **Safe writes.** Write to a temp file first, then POST with `--data-binary @/tmp/file.md`.
+3. **Identify yourself.** Every POST requires `-H 'X-Agent-Name: {name}'` matching the URL. The server rejects cross-channel posts (403).
+4. **Tag questions with `[?BOSS]`** — they render highlighted in the dashboard.
+5. **Concise summaries.** Always Use "{name}: {summary}" (required!).
+6. **Safe writes.** Write to a temp file first, then POST with `--data-binary @/tmp/file.md`.
+7. **Report your location and metrics.** Include `"branch"`, `"pr"`, and `"test_count"` in every POST. `"branch"` is the git branch you are working on. `"pr"` is the pull/merge request number (e.g. `"#699"`). `"test_count"` is the number of passing tests. All three are **required** whenever applicable — the dashboard overview table is incomplete without them.
+8. **Register your tmux session.** Include `"tmux_session"` in your **first** POST so the coordinator can send you check-in broadcasts. Find your session name with `tmux display-message -p '#S'`. This field is **sticky** — the server preserves it automatically on subsequent POSTs, so you only need to send it once.
+9. **Model economy.** Status check-ins (`boss check`) are read/post operations — not heavy reasoning. Use a lightweight model (e.g. Haiku) for check-ins, then switch back to your working model (e.g. Opus) for real work. The broadcast script handles this automatically via `/model` switching.
 
 ### JSON Format Reference
 
@@ -44,16 +48,19 @@ Space: `local-reconciler`
 {
   "status": "active|done|blocked|idle|error",
   "summary": "One-line summary (required)",
+  "branch": "feat/my-feature",
+  "worktree": "../platform-api-server/",
+  "pr": "#699",
   "phase": "current phase",
   "test_count": 0,
   "items": ["bullet point 1", "bullet point 2"],
   "sections": [{"title": "Section Name", "items": ["detail"]}],
   "questions": ["tagged [?BOSS] automatically"],
   "blockers": ["highlighted automatically"],
+  "tmux_session": "my-tmux-session",
   "next_steps": "What you're doing next"
 }
 ```
-
 
 ---
 

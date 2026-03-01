@@ -26,13 +26,29 @@ func serverBaseURL(srv *Server) string {
 	return "http://localhost" + srv.Port()
 }
 
+func extractAgentName(url string) string {
+	parts := strings.Split(url, "/agent/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimRight(parts[1], "/")
+}
+
 func postJSON(t *testing.T, url string, payload any) *http.Response {
 	t.Helper()
 	data, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	resp, err := http.Post(url, "application/json", strings.NewReader(string(data)))
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("new request %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if name := extractAgentName(url); name != "" {
+		req.Header.Set("X-Agent-Name", name)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
@@ -41,7 +57,15 @@ func postJSON(t *testing.T, url string, payload any) *http.Response {
 
 func postText(t *testing.T, url, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(url, "text/plain", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	if name := extractAgentName(url); name != "" {
+		req.Header.Set("X-Agent-Name", name)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
