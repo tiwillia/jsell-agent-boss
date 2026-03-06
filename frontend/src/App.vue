@@ -145,10 +145,10 @@ async function handleBroadcastSpace() {
   if (!selectedSpace.value) return
   try {
     await api.broadcastSpace(selectedSpace.value)
-    showStatus(`Broadcast sent to all agents in ${selectedSpace.value}`)
+    showStatus(`Nudge sent to all agents in ${selectedSpace.value}`)
   } catch (err) {
     console.error('Broadcast failed:', err)
-    showError('Broadcast failed. Please try again.')
+    showError('Nudge failed. Please try again.')
   }
 }
 
@@ -179,10 +179,10 @@ async function handleBroadcastAgent() {
   if (!selectedSpace.value || !selectedAgent.value) return
   try {
     await api.broadcastAgent(selectedSpace.value, selectedAgent.value)
-    showStatus(`Broadcast sent to ${selectedAgent.value}`)
+    showStatus(`Nudge sent to ${selectedAgent.value}`)
   } catch (err) {
     console.error('Broadcast agent failed:', err)
-    showError('Broadcast failed. Please try again.')
+    showError('Nudge failed. Please try again.')
   }
 }
 
@@ -244,10 +244,10 @@ async function handleBroadcastSingleAgent(agentName: string) {
   if (!selectedSpace.value) return
   try {
     await api.broadcastAgent(selectedSpace.value, agentName)
-    showStatus(`Broadcast sent to ${agentName}`)
+    showStatus(`Nudge sent to ${agentName}`)
   } catch (err) {
     console.error('Broadcast agent failed:', err)
-    showError('Broadcast failed. Please try again.')
+    showError('Nudge failed. Please try again.')
   }
 }
 
@@ -318,11 +318,11 @@ function setupSSE() {
   })
 
   sse.on('broadcast_complete', () => {
-    pushLog('broadcast_complete', 'Broadcast completed')
+    pushLog('broadcast_complete', 'Nudge completed')
   })
 
   sse.on('broadcast_progress', (data) => {
-    pushLog('broadcast_progress', data.message || 'Broadcast in progress...')
+    pushLog('broadcast_progress', data.message || 'Nudge in progress...')
   })
 }
 

@@ -125,11 +125,11 @@ const inboxPending = computed(() => inboxRef.value?.pendingCount ?? 0)
         <Tooltip>
           <TooltipTrigger as-child>
             <Button variant="outline" size="sm" @click="emit('broadcast')">
-              Broadcast All
+              Nudge All
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Send the latest space state to all agents' tmux sessions
+            Nudge all agents with the latest space state
           </TooltipContent>
         </Tooltip>
       </div>
@@ -265,7 +265,7 @@ const inboxPending = computed(() => inboxRef.value?.pendingCount ?? 0)
               <!-- Card footer with action buttons -->
               <CardFooter class="pt-0 pb-3 px-4 gap-2" @click.stop>
                 <Button variant="outline" size="sm" class="h-7 text-xs" @click.stop="emit('broadcast-agent', name)">
-                  Poke
+                  Nudge
                 </Button>
                 <Button variant="outline" size="sm" class="h-7 text-xs" @click.stop="openMessageInput(name)">
                   Message

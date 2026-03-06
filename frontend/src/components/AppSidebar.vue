@@ -222,11 +222,11 @@ function statusTooltip(status: string): string {
             class="w-full"
             @click="emit('broadcast')"
           >
-            Broadcast {{ currentSpace.name }}
+            Nudge {{ currentSpace.name }}
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          Send the latest space state to all agents' tmux sessions
+          Nudge all agents with the latest space state
         </TooltipContent>
       </Tooltip>
     </SidebarFooter>

@@ -181,11 +181,11 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
           <Tooltip>
             <TooltipTrigger as-child>
               <Button variant="outline" size="sm" @click="emit('broadcast')">
-                Broadcast
+                Nudge
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Send the latest space state to this agent's tmux session
+              Nudge this agent with the latest space state
             </TooltipContent>
           </Tooltip>
           <Tooltip>
