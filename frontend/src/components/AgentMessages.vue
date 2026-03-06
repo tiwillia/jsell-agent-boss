@@ -87,9 +87,9 @@ const sortedMessages = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full" role="log" aria-label="Message history">
+  <div class="flex flex-col h-full min-h-0" role="log" aria-label="Message history">
     <!-- Messages area -->
-    <ScrollArea ref="scrollRef" class="flex-1 px-4 py-3">
+    <ScrollArea ref="scrollRef" class="flex-1 min-h-0 px-4 py-3">
       <div v-if="sortedMessages.length === 0" class="flex flex-col items-center justify-center h-32 text-muted-foreground font-text text-sm text-center gap-1">
         <p>No messages yet</p>
         <p class="text-xs">Send a message below to communicate with this agent</p>

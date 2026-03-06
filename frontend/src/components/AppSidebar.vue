@@ -125,24 +125,20 @@ function statusTooltip(status: string): string {
                 :aria-current="space.name === selectedSpace ? 'true' : undefined"
                 @click="handleSelectSpace(space.name)"
               >
-                <AlertCircle
-                  v-if="spaceAttentionCount(space) > 0"
-                  class="size-3.5 text-amber-500 shrink-0"
-                  :aria-label="`${spaceAttentionCount(space)} items need attention`"
-                />
                 <span class="truncate">{{ space.name }}</span>
               </SidebarMenuButton>
               <Tooltip v-if="spaceAttentionCount(space) > 0">
                 <TooltipTrigger as-child>
-                  <SidebarMenuBadge
-                    class="text-amber-500 font-semibold"
-                    :title="`${spaceAttentionCount(space)} items need attention`"
-                  >
+                  <SidebarMenuBadge class="flex items-center gap-1 text-amber-500 font-semibold">
+                    <span class="relative flex size-3">
+                      <span class="absolute inline-flex size-full animate-ping rounded-full bg-amber-400 opacity-50" />
+                      <AlertCircle class="relative size-3" />
+                    </span>
                     {{ spaceAttentionCount(space) }}
                   </SidebarMenuBadge>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  {{ spaceAttentionCount(space) }} question{{ spaceAttentionCount(space) !== 1 ? 's' : '' }}/blocker{{ spaceAttentionCount(space) !== 1 ? 's' : '' }} need attention
+                  {{ spaceAttentionCount(space) }} item{{ spaceAttentionCount(space) !== 1 ? 's' : '' }} need{{ spaceAttentionCount(space) === 1 ? 's' : '' }} attention
                 </TooltipContent>
               </Tooltip>
               <SidebarMenuBadge v-else :title="`${space.agent_count} agent${space.agent_count !== 1 ? 's' : ''} in this space`">
