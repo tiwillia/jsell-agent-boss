@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { AgentMessage } from '@/types'
-import { ref, nextTick, watch, computed, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { SendHorizontal, MessageCircle, Check } from 'lucide-vue-next'
+import { SendHorizontal, MessageCircle, Check, ChevronDown } from 'lucide-vue-next'
 import AgentAvatar from './AgentAvatar.vue'
 import { formatFullDate } from '@/composables/useTime'
 
@@ -20,6 +20,8 @@ const emit = defineEmits<{
 
 const messageText = ref('')
 const scrollRef = ref<InstanceType<typeof ScrollArea> | null>(null)
+const isAtBottom = ref(true)
+const newMessageCount = ref(0)
 
 function formatTime(timestamp: string): string {
   const d = new Date(timestamp)
@@ -54,19 +56,54 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+function getScrollEl(): HTMLElement | null {
+  return scrollRef.value?.$el?.querySelector('[data-radix-scroll-area-viewport]') ?? null
+}
+
+function checkAtBottom() {
+  const el = getScrollEl()
+  if (!el) return
+  isAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 32
+  if (isAtBottom.value) newMessageCount.value = 0
+}
+
 function scrollToBottom() {
   nextTick(() => {
-    const el = scrollRef.value?.$el?.querySelector('[data-radix-scroll-area-viewport]')
-    if (el) el.scrollTop = el.scrollHeight
+    const el = getScrollEl()
+    if (el) {
+      el.scrollTop = el.scrollHeight
+      isAtBottom.value = true
+      newMessageCount.value = 0
+    }
   })
 }
 
-onMounted(() => nextTick().then(scrollToBottom))
+onMounted(() => {
+  nextTick().then(() => {
+    scrollToBottom()
+    const el = getScrollEl()
+    if (el) el.addEventListener('scroll', checkAtBottom, { passive: true })
+  })
+})
 
-watch(() => props.messages.length, scrollToBottom)
+onUnmounted(() => {
+  const el = getScrollEl()
+  if (el) el.removeEventListener('scroll', checkAtBottom)
+})
+
+watch(() => props.messages.length, (newLen, oldLen) => {
+  if (isAtBottom.value) {
+    scrollToBottom()
+  } else {
+    newMessageCount.value += newLen - oldLen
+  }
+})
 
 // Scroll to bottom when switching to a different agent
-watch(() => props.agentName, scrollToBottom)
+watch(() => props.agentName, () => {
+  newMessageCount.value = 0
+  scrollToBottom()
+})
 
 type MessageEntry =
   | {
@@ -233,6 +270,19 @@ const enrichedMessages = computed((): MessageEntry[] => {
         </template>
       </div>
     </ScrollArea>
+
+    <!-- New messages indicator -->
+    <div v-if="newMessageCount > 0 && !isAtBottom" class="flex justify-center py-1.5 border-t border-border/50 bg-card">
+      <Button
+        size="sm"
+        variant="secondary"
+        class="h-7 px-3 text-xs gap-1.5 shadow-sm"
+        @click="scrollToBottom"
+      >
+        <ChevronDown class="size-3.5" />
+        {{ newMessageCount }} new message{{ newMessageCount === 1 ? '' : 's' }}
+      </Button>
+    </div>
 
     <!-- Input area -->
     <div class="border-t p-3 flex gap-2">

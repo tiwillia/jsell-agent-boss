@@ -579,7 +579,7 @@ const attentionSectionClass = computed(() => {
             {{ agent.messages.length }}
           </Badge>
         </div>
-        <div class="h-[350px] rounded-xl border bg-card text-card-foreground flex flex-col overflow-hidden">
+        <div class="h-[500px] rounded-xl border bg-card text-card-foreground flex flex-col overflow-hidden">
           <AgentMessages
             :messages="agent.messages ?? []"
             :agent-name="agentName"

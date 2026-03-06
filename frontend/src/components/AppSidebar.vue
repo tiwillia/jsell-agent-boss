@@ -39,7 +39,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Radio, AlertCircle, ChevronRight, MoreHorizontal, Trash2 } from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Radio, AlertCircle, ChevronRight, MoreHorizontal, Trash2, Plus } from 'lucide-vue-next'
 import AgentAvatar from './AgentAvatar.vue'
 
 const props = defineProps<{
@@ -55,6 +64,7 @@ const emit = defineEmits<{
   'select-agent': [name: string]
   broadcast: []
   'delete-space': [name: string]
+  'create-space': [name: string]
 }>()
 
 const router = useRouter()
@@ -211,6 +221,18 @@ function statusLabel(status: string): string {
   return display ? display.label : status
 }
 
+// New space dialog
+const newSpaceDialogOpen = ref(false)
+const newSpaceName = ref('')
+
+function submitNewSpace() {
+  const name = newSpaceName.value.trim()
+  if (!name) return
+  emit('create-space', name)
+  newSpaceName.value = ''
+  newSpaceDialogOpen.value = false
+}
+
 </script>
 
 <template>
@@ -226,7 +248,23 @@ function statusLabel(status: string): string {
     <SidebarContent class="overflow-x-hidden overflow-y-auto">
       <!-- Spaces -->
       <SidebarGroup>
-        <SidebarGroupLabel>Spaces</SidebarGroupLabel>
+        <SidebarGroupLabel class="flex items-center justify-between">
+          Spaces
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                aria-label="Create new space"
+                @click="newSpaceDialogOpen = true"
+              >
+                <Plus class="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Create new space</TooltipContent>
+          </Tooltip>
+        </SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             <SidebarMenuItem v-for="space in sortedSpaces" :key="space.name" class="group/space-item">
@@ -529,7 +567,6 @@ function statusLabel(status: string): string {
       </DialogHeader>
       <form @submit.prevent="submitNewSpace">
         <Input
-          ref="newSpaceNameInput"
           v-model="newSpaceName"
           placeholder="e.g. MyProject"
           class="mb-4"
