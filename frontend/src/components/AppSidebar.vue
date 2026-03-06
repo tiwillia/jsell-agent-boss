@@ -129,14 +129,16 @@ const inactiveOpen = ref(false)
 watch(
   () => props.selectedSpace,
   () => {
-    // Clear search when navigating to a different space
+    // Clear search and reset inactive section when navigating to a different space
     agentSearch.value = ''
+    inactiveOpen.value = false
   }
 )
 watch(
   () => props.currentSpace,
-  (space, prev) => {
-    if (space && !prev) {
+  (space) => {
+    if (space) {
+      // After space loads, open inactive if it's a small space
       inactiveOpen.value = Object.keys(space.agents).length < 5
     }
   },
@@ -329,7 +331,7 @@ function statusLabel(status: string): string {
                     <div class="relative shrink-0">
                       <AgentAvatar :name="name" :size="20" />
                       <span
-                        :class="['absolute -bottom-0.5 -right-0.5 block size-2 rounded-full ring-1 ring-sidebar', statusDotClass(agent.status)]"
+                        :class="['absolute -bottom-0.5 -right-0.5 block size-2.5 rounded-full ring-1 ring-sidebar', statusDotClass(agent.status)]"
                         aria-hidden="true"
                       />
                     </div>
@@ -413,15 +415,14 @@ function statusLabel(status: string): string {
                   <SidebarMenu>
                     <SidebarMenuItem v-for="[name, agent] in inactiveAgents" :key="name">
                       <SidebarMenuButton
-                        size="lg"
-                        class="py-3 h-auto min-h-12 opacity-60"
+                        class="py-1 h-8 opacity-60"
                         :data-active="name === selectedAgent"
                         :aria-current="name === selectedAgent ? 'true' : undefined"
                         :aria-label="`${name} — ${statusLabel(agent.status)}`"
                         @click="handleSelectAgent(name)"
                       >
                         <div class="relative shrink-0">
-                          <AgentAvatar :name="name" :size="20" />
+                          <AgentAvatar :name="name" :size="16" />
                           <span
                             :class="['absolute -bottom-0.5 -right-0.5 block size-2 rounded-full ring-1 ring-sidebar', statusDotClass(agent.status)]"
                             aria-hidden="true"
@@ -480,7 +481,7 @@ function statusLabel(status: string): string {
             :disabled="broadcasting"
             @click="emit('broadcast')"
           >
-            <Radio class="size-4" /> Nudge {{ currentSpace.name }}
+            <Radio class="size-4" /> Check in all agents
           </Button>
         </TooltipTrigger>
         <TooltipContent>
