@@ -28,7 +28,9 @@ const tmuxStatus = ref<Record<string, TmuxAgentStatus>>({})
 
 const loading = ref(true)
 const errorMessage = ref<string | null>(null)
+const successMessage = ref<string | null>(null)
 const statusAnnouncement = ref('')
+const broadcasting = ref(false)
 
 const sse = useSSE()
 const eventLogRef = ref<InstanceType<typeof EventLog> | null>(null)
@@ -67,6 +69,10 @@ function showError(msg: string) {
 
 function showStatus(msg: string) {
   statusAnnouncement.value = msg
+  successMessage.value = msg
+  setTimeout(() => {
+    successMessage.value = null
+  }, 3000)
 }
 
 // ── Data fetching ──────────────────────────────────────────────────
@@ -126,6 +132,7 @@ watch(
   () => selectedSpace.value,
   (space, oldSpace) => {
     if (space && space !== oldSpace) {
+      currentSpace.value = null  // clear stale data immediately
       loadSpace(space)
       loadTmuxStatus(space)
       // Reconnect SSE to this space
@@ -142,13 +149,16 @@ watch(
 
 // ── Action handlers ────────────────────────────────────────────────
 async function handleBroadcastSpace() {
-  if (!selectedSpace.value) return
+  if (!selectedSpace.value || broadcasting.value) return
+  broadcasting.value = true
   try {
     await api.broadcastSpace(selectedSpace.value)
     showStatus(`Nudge sent to all agents in ${selectedSpace.value}`)
   } catch (err) {
     console.error('Broadcast failed:', err)
     showError('Nudge failed. Please try again.')
+  } finally {
+    broadcasting.value = false
   }
 }
 
@@ -176,13 +186,16 @@ async function handleReplyAgent(text: string) {
 }
 
 async function handleBroadcastAgent() {
-  if (!selectedSpace.value || !selectedAgent.value) return
+  if (!selectedSpace.value || !selectedAgent.value || broadcasting.value) return
+  broadcasting.value = true
   try {
     await api.broadcastAgent(selectedSpace.value, selectedAgent.value)
     showStatus(`Nudge sent to ${selectedAgent.value}`)
   } catch (err) {
     console.error('Broadcast agent failed:', err)
     showError('Nudge failed. Please try again.')
+  } finally {
+    broadcasting.value = false
   }
 }
 
@@ -433,10 +446,15 @@ onUnmounted(() => {
           <SidebarTrigger class="-ml-1" />
           <Separator orientation="vertical" class="h-5" />
           <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-sm font-text">
-            <span class="text-primary font-bold text-lg font-sans">Agent Boss</span>
+            <button
+              class="text-primary font-bold text-lg font-sans hover:text-primary/80 transition-colors cursor-pointer"
+              aria-label="Navigate to home"
+              @click="router.push('/')"
+            >Agent Boss</button>
             <template v-if="selectedSpace">
               <span class="text-muted-foreground">/</span>
               <button
+                :aria-label="`Navigate to ${selectedSpace} overview`"
                 class="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                 :class="{ 'text-foreground font-medium': !selectedAgent }"
                 @click="router.push('/' + selectedSpace)"
@@ -489,6 +507,22 @@ onUnmounted(() => {
             class="text-destructive hover:text-foreground text-xs font-medium shrink-0"
             aria-label="Dismiss error"
             @click="errorMessage = null"
+          >
+            Dismiss
+          </button>
+        </div>
+
+        <!-- Success toast -->
+        <div
+          v-if="successMessage"
+          role="status"
+          class="mx-4 mt-2 rounded-md border border-teal-500/50 bg-teal-500/10 px-4 py-2 text-sm text-teal-600 dark:text-teal-400 flex items-center justify-between gap-2"
+        >
+          <span>{{ successMessage }}</span>
+          <button
+            class="text-teal-600 dark:text-teal-400 hover:text-foreground text-xs font-medium shrink-0"
+            aria-label="Dismiss notification"
+            @click="successMessage = null"
           >
             Dismiss
           </button>

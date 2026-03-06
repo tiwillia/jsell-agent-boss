@@ -16,7 +16,7 @@ const config = computed(() => {
     case 'active':
       return { dotClass: 'bg-green-500', badgeClass: 'bg-green-500/15 text-green-400 border-green-500/30' }
     case 'blocked':
-      return { dotClass: 'bg-primary', badgeClass: 'bg-primary/15 text-primary border-primary/30' }
+      return { dotClass: 'bg-amber-500', badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30' }
     case 'done':
       return { dotClass: 'bg-teal-500', badgeClass: 'bg-teal-500/15 text-teal-400 border-teal-500/30' }
     case 'idle':

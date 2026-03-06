@@ -84,7 +84,7 @@ function agentAttentionCount(agent: { questions?: string[]; blockers?: string[] 
 function statusDotClass(status: string): string {
   switch (status) {
     case 'active': return 'bg-green-500'
-    case 'blocked': return 'bg-primary'
+    case 'blocked': return 'bg-amber-500'
     case 'done': return 'bg-teal-500'
     case 'idle': return 'bg-muted-foreground'
     case 'error': return 'bg-destructive'
@@ -129,10 +129,7 @@ function statusTooltip(status: string): string {
               <Tooltip v-if="spaceAttentionCount(space) > 0">
                 <TooltipTrigger as-child>
                   <SidebarMenuBadge class="flex items-center gap-1 text-amber-500 font-semibold">
-                    <span class="relative flex size-3">
-                      <span class="absolute inline-flex size-full animate-ping rounded-full bg-amber-400 opacity-50" />
-                      <AlertCircle class="relative size-3" />
-                    </span>
+                    <AlertCircle class="size-3" aria-hidden="true" />
                     {{ spaceAttentionCount(space) }}
                   </SidebarMenuBadge>
                 </TooltipTrigger>
@@ -191,18 +188,10 @@ function statusTooltip(status: string): string {
                   >
                     <div class="relative shrink-0">
                       <AgentAvatar :name="name" :size="20" />
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <span
-                            :class="['absolute -bottom-0.5 -right-0.5 block size-2 rounded-full ring-1 ring-sidebar', statusDotClass(agent.status)]"
-                            :aria-label="statusLabel(agent.status)"
-                            role="img"
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          {{ statusTooltip(agent.status) }}
-                        </TooltipContent>
-                      </Tooltip>
+                      <span
+                        :class="['absolute -bottom-0.5 -right-0.5 block size-2 rounded-full ring-1 ring-sidebar', statusDotClass(agent.status)]"
+                        aria-hidden="true"
+                      />
                     </div>
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
                       <span class="truncate">{{ name }}</span>
