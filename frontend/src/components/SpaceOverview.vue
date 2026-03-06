@@ -59,6 +59,7 @@ const emit = defineEmits<{
   'broadcast-agent': [name: string]
   'send-message-to-agent': [agentName: string, text: string]
   'delete-space': []
+  'clear-done-agents': [names: string[]]
 }>()
 
 const agentSearch = ref('')
@@ -66,6 +67,7 @@ const activeTab = ref('agents')
 const deleteDialogOpen = ref(false)
 const deleteDialogAgent = ref<string | null>(null)
 const deleteSpaceDialogOpen = ref(false)
+const clearDoneDialogOpen = ref(false)
 const messageDialogOpen = ref(false)
 const messageDialogAgent = ref<string | null>(null)
 const messageText = ref('')
@@ -281,6 +283,22 @@ const activeSections = computed(() => [
             </TooltipTrigger>
             <TooltipContent>
               Send a nudge to all {{ agentCount }} agent{{ agentCount !== 1 ? 's' : '' }} in this space
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip v-if="doneIdleAgents.length > 0">
+            <TooltipTrigger as-child>
+              <Button
+                variant="outline"
+                size="sm"
+                class="text-muted-foreground hover:text-destructive hover:border-destructive/50"
+                @click="clearDoneDialogOpen = true"
+              >
+                <Trash2 class="size-4" />
+                Clear Done/Idle ({{ doneIdleAgents.length }})
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Remove all {{ doneIdleAgents.length }} done or idle agent{{ doneIdleAgents.length !== 1 ? 's' : '' }} from this space
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -665,6 +683,28 @@ const activeSections = computed(() => [
           <InterruptTracker ref="inboxRef" :space-name="space.name" />
         </TabsContent>
       </Tabs>
+
+      <!-- Clear done/idle agents confirmation dialog -->
+      <AlertDialog v-model:open="clearDoneDialogOpen">
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear {{ doneIdleAgents.length }} done/idle agent{{ doneIdleAgents.length !== 1 ? 's' : '' }}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove all done and idle agents from this space. Active, blocked, and error agents will remain. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              @click="emit('clear-done-agents', doneIdleAgents.map(([name]) => name))"
+            >
+              <Trash2 class="size-4" />
+              Clear {{ doneIdleAgents.length }} agent{{ doneIdleAgents.length !== 1 ? 's' : '' }}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <!-- Delete space confirmation dialog -->
       <AlertDialog v-model:open="deleteSpaceDialogOpen">

@@ -315,6 +315,20 @@ async function handleCreateSpace(spaceName: string) {
   }
 }
 
+async function handleClearDoneAgents(agentNames: string[]) {
+  const space = selectedSpace.value
+  if (!space || agentNames.length === 0) return
+  try {
+    await Promise.all(agentNames.map(name => api.deleteAgent(space, name)))
+    showStatus(`Removed ${agentNames.length} done/idle agent${agentNames.length !== 1 ? 's' : ''}`)
+    await loadSpace(space)
+    await loadSpaces()
+  } catch (err) {
+    console.error('Clear done agents failed:', err)
+    showError('Failed to clear done/idle agents.')
+  }
+}
+
 async function handleBroadcastSingleAgent(agentName: string) {
   if (!selectedSpace.value) return
   try {
@@ -858,6 +872,7 @@ onUnmounted(() => {
             @broadcast-agent="handleBroadcastSingleAgent"
             @send-message-to-agent="handleSendMessageToAgent"
             @delete-space="handleDeleteSpace(selectedSpace)"
+            @clear-done-agents="handleClearDoneAgents"
           />
 
           <!-- Empty state -->
