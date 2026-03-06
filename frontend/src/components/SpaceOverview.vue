@@ -4,7 +4,7 @@ import { ref, computed, nextTick } from 'vue'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -37,6 +37,7 @@ import {
   GitBranch,
   ExternalLink,
   Clock,
+  Layers,
 } from 'lucide-vue-next'
 import StatusBadge from './StatusBadge.vue'
 import InterruptTracker from './InterruptTracker.vue'
@@ -60,7 +61,7 @@ const deleteDialogAgent = ref<string | null>(null)
 const messageDialogOpen = ref(false)
 const messageDialogAgent = ref<string | null>(null)
 const messageText = ref('')
-const messageInputRef = ref<HTMLInputElement | null>(null)
+const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 
 function openDeleteDialog(name: string) {
   deleteDialogAgent.value = name
@@ -179,6 +180,15 @@ const headerSummary = computed(() => {
 
 const inboxPending = computed(() => inboxRef.value?.pendingCount ?? attentionCount.value)
 
+/** Returns Tailwind bg class for the freshness dot on the avatar */
+function freshnessDotClass(dateStr: string): string {
+  const tier = freshness(dateStr)
+  if (tier === 'live') return 'bg-blue-400'
+  if (tier === 'recent') return 'bg-teal-400'
+  if (tier === 'normal') return 'bg-gray-400/50'
+  return 'bg-amber-400/60'
+}
+
 /** Check if an agent has any attention items */
 function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boolean {
   return (agent.questions?.length ?? 0) > 0 || (agent.blockers?.length ?? 0) > 0
@@ -218,7 +228,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
       <Tabs default-value="agents">
         <TabsList>
           <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="inbox" class="gap-1.5">
+          <TabsTrigger value="inbox" class="gap-1.5" :aria-label="inboxPending > 0 ? 'Inbox, ' + inboxPending + ' pending items' : 'Inbox'">
             Inbox
             <Badge
               v-if="inboxPending > 0"
@@ -241,11 +251,10 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
               v-for="[name, agent] in sortedAgents"
               :key="name"
               role="listitem"
-              tabindex="0"
-              class="group cursor-pointer transition-all duration-150 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 relative flex flex-col"
+              class="group cursor-pointer transition-all duration-150 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 relative flex flex-col !py-0 !gap-0 min-h-[180px]"
               :class="[
                 agent.blockers?.length
-                  ? 'border-l-4 border-l-red-500 shadow-md shadow-red-500/5'
+                  ? 'border-l-4 border-l-orange-500 shadow-md shadow-orange-500/5'
                   : agent.questions?.length
                     ? 'border-l-4 border-l-amber-500 shadow-md shadow-amber-500/5'
                     : '',
@@ -261,22 +270,17 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                   <div class="flex items-center gap-2.5 min-w-0">
                     <Tooltip>
                       <TooltipTrigger as-child>
-                        <span class="relative inline-block shrink-0">
-                          <AgentAvatar :name="name" :size="28" />
-                          <!-- Status dot overlaid on bottom-right corner of avatar -->
+                        <div class="relative inline-block shrink-0 cursor-default">
+                          <AgentAvatar :name="name" :size="28" aria-hidden="true" />
                           <span
-                            class="absolute bottom-0 right-0 translate-x-[25%] translate-y-[25%] block size-2.5 rounded-full border-2 border-card"
-                            :class="{
-                              'bg-green-500': freshness(agent.updated_at) === 'live' || freshness(agent.updated_at) === 'recent',
-                              'bg-muted-foreground/40': freshness(agent.updated_at) === 'normal',
-                              'bg-muted-foreground/20': freshness(agent.updated_at) === 'stale',
-                            }"
+                            class="absolute -bottom-0.5 -right-0.5 block size-2.5 rounded-full ring-2 ring-card"
+                            :class="freshnessDotClass(agent.updated_at)"
                           />
-                        </span>
+                        </div>
                       </TooltipTrigger>
                       <TooltipContent>Updated {{ relativeTime(agent.updated_at) }}</TooltipContent>
                     </Tooltip>
-                    <span class="text-base font-semibold truncate">{{ name }}</span>
+                    <h3 class="text-base font-semibold truncate m-0">{{ name }}</h3>
                   </div>
                   <div class="flex items-center gap-1.5 shrink-0">
                     <StatusBadge :status="agent.status" />
@@ -301,39 +305,50 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                   {{ agent.summary || 'No summary available' }}
                 </p>
 
-                <!-- Row 3: Metadata — compact, one line, no wrapping -->
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground font-text overflow-hidden flex-nowrap">
-                  <span v-if="agent.phase" class="truncate max-w-[80px]" :title="`Phase: ${agent.phase}`">
-                    {{ agent.phase }}
-                  </span>
-                  <span v-if="agent.phase && (agent.branch || agent.pr)" class="shrink-0 text-border">·</span>
-                  <Tooltip v-if="agent.branch">
-                    <TooltipTrigger as-child>
-                      <span class="inline-flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded text-[10px] truncate max-w-[100px] cursor-default">
-                        <GitBranch class="size-3 shrink-0" />
-                        {{ agent.branch }}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Branch: {{ agent.branch }}</p>
-                      <p v-if="agent.repo_url">Repo: {{ agent.repo_url }}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <a
-                    v-if="agent.pr"
-                    :href="agent.pr"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="inline-flex items-center gap-0.5 text-primary/70 hover:text-primary transition-colors shrink-0"
-                    :title="agent.pr"
-                    @click.stop
-                  >
-                    <ExternalLink class="size-3" />
-                    PR
-                  </a>
+                <!-- Row 3: Metadata — badges on left, timestamp on right -->
+                <div class="flex items-end justify-between gap-2 text-[11px] text-muted-foreground">
+                  <!-- Left: phase + branch stacked -->
+                  <div class="flex flex-col gap-1 min-w-0">
+                    <Tooltip v-if="agent.phase">
+                      <TooltipTrigger as-child>
+                        <span class="inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 rounded text-[10px] truncate max-w-[160px] cursor-default w-fit">
+                          <Layers class="size-3 shrink-0" />
+                          {{ agent.phase }}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>Phase: {{ agent.phase }}</TooltipContent>
+                    </Tooltip>
+                    <div v-if="agent.branch || agent.pr" class="flex items-center gap-1.5">
+                      <Tooltip v-if="agent.branch">
+                        <TooltipTrigger as-child>
+                          <span class="inline-flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded text-[10px] truncate max-w-[140px] cursor-default">
+                            <GitBranch class="size-3 shrink-0" />
+                            {{ agent.branch }}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Branch: {{ agent.branch }}</p>
+                          <p v-if="agent.repo_url">Repo: {{ agent.repo_url }}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <a
+                        v-if="agent.pr"
+                        :href="agent.pr"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center gap-0.5 text-primary/70 hover:text-primary transition-colors shrink-0"
+                        :title="agent.pr"
+                        @click.stop
+                      >
+                        <ExternalLink class="size-3" />
+                        PR
+                      </a>
+                    </div>
+                  </div>
+                  <!-- Right: timestamp -->
                   <Tooltip>
                     <TooltipTrigger as-child>
-                      <span class="inline-flex items-center gap-1 cursor-default whitespace-nowrap shrink-0 ml-auto">
+                      <span class="inline-flex items-center gap-1 cursor-default whitespace-nowrap shrink-0 font-text">
                         <Clock class="size-3 shrink-0" />
                         {{ relativeTime(agent.updated_at) }}
                       </span>
@@ -360,7 +375,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                   <Button
                     variant="outline"
                     size="sm"
-                    class="h-5 px-1.5 text-[10px] ml-auto shrink-0"
+                    class="h-8 px-1.5 text-[10px] ml-auto shrink-0"
                     aria-label="Reply"
                     @click.stop="emit('select-agent', name)"
                   >
@@ -370,13 +385,13 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                 </div>
 
                 <!-- Row 5: Footer — Actions -->
-                <div class="flex items-center gap-2 pt-1 border-t border-border/50" @click.stop>
+                <div class="flex items-center gap-2 pt-1 border-t border-border/50 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity" @click.stop>
                   <Tooltip>
                     <TooltipTrigger as-child>
                       <Button
                         variant="outline"
                         size="sm"
-                        class="h-7 px-2.5 text-xs"
+                        class="h-8 px-2.5 text-xs"
                         aria-label="Nudge agent"
                         @click.stop="emit('broadcast-agent', name)"
                       >
@@ -391,7 +406,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                       <Button
                         variant="outline"
                         size="sm"
-                        class="h-7 px-2.5 text-xs"
+                        class="h-8 px-2.5 text-xs"
                         aria-label="Send message to agent"
                         @click.stop="openMessageDialog(name)"
                       >
@@ -407,7 +422,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                       <Button
                         variant="ghost"
                         size="sm"
-                        class="h-7 w-7 p-0 text-muted-foreground/40 hover:text-destructive transition-colors"
+                        class="h-8 w-8 p-0 text-muted-foreground/40 hover:text-destructive transition-colors"
                         aria-label="Delete agent"
                         @click.stop="openDeleteDialog(name)"
                       >
@@ -472,18 +487,18 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
             </DialogDescription>
           </DialogHeader>
           <form @submit.prevent="sendQuickMessage">
-            <div class="flex gap-2">
-              <Input
+            <div class="flex flex-col gap-2">
+              <Textarea
                 ref="messageInputRef"
                 v-model="messageText"
                 placeholder="Type your message..."
-                class="flex-1"
+                :rows="3"
                 @keydown.escape="messageDialogOpen = false"
               />
               <Button
                 type="submit"
                 size="sm"
-                class="shrink-0"
+                class="self-end shrink-0"
                 :disabled="!messageText.trim()"
               >
                 <SendHorizontal class="size-4" />
