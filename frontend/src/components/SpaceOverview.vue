@@ -450,8 +450,8 @@ const activeSections = computed(() => [
                         class="flex items-center gap-1.5 text-[11px] overflow-hidden"
                         @click.stop
                       >
-                        <AlertTriangle v-if="agent.blockers?.length" class="size-3 shrink-0 text-red-500" />
-                        <span v-if="agent.blockers?.length" class="text-red-600 dark:text-red-400 truncate">
+                        <AlertTriangle v-if="agent.blockers?.length" class="size-3 shrink-0 text-orange-500" />
+                        <span v-if="agent.blockers?.length" class="text-orange-600 dark:text-orange-400 truncate">
                           {{ agent.blockers.length }} blocker{{ agent.blockers.length !== 1 ? 's' : '' }}: {{ agent.blockers[0] }}
                         </span>
                         <span v-if="agent.blockers?.length && agent.questions?.length" class="shrink-0 text-border">·</span>

@@ -163,7 +163,7 @@ const statusAccentClass = computed(() => {
 })
 
 const attentionSectionClass = computed(() => {
-  if (hasBlockers.value && !hasQuestions.value) return 'bg-red-500/10 border-red-500/30'
+  if (hasBlockers.value && !hasQuestions.value) return 'bg-orange-500/10 border-orange-500/30'
   return 'bg-amber-500/10 border-amber-500/30'
 })
 </script>
@@ -316,17 +316,17 @@ const attentionSectionClass = computed(() => {
         <div
           v-for="(b, bi) in agent.blockers"
           :key="'b-' + bi"
-          class="rounded-lg border-2 border-red-500/50 bg-red-500/5 p-4 space-y-3"
+          class="rounded-lg border-2 border-orange-500/50 bg-orange-500/5 p-4 space-y-3"
           role="article"
           :aria-label="`Blocker: ${b}`"
         >
           <!-- Blocker header -->
           <div class="flex items-start gap-3">
-            <div class="rounded-full bg-red-500/15 p-1.5 shrink-0 mt-0.5">
-              <AlertTriangle class="size-4 text-red-500" />
+            <div class="rounded-full bg-orange-500/15 p-1.5 shrink-0 mt-0.5">
+              <AlertTriangle class="size-4 text-orange-500" />
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium text-red-600 dark:text-red-400 uppercase tracking-wide mb-1">Blocker</p>
+              <p class="text-xs font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-1">Blocker</p>
               <p class="font-text text-sm leading-relaxed">{{ b }}</p>
             </div>
           </div>
@@ -336,7 +336,7 @@ const attentionSectionClass = computed(() => {
             <Textarea
               v-model="blockerReplyTexts[bi]"
               :placeholder="`Respond to unblock (e.g. 'You're unblocked because...')...`"
-              class="min-h-[60px] text-sm font-text resize-y border-red-500/30 focus-visible:ring-red-500/50"
+              class="min-h-[60px] text-sm font-text resize-y border-orange-500/30 focus-visible:ring-orange-500/50"
               :disabled="blockerReplying[bi]"
             />
             <div class="flex items-center gap-2">
