@@ -677,6 +677,7 @@ const activeSections = computed(() => [
                 placeholder="Type your message..."
                 :rows="3"
                 @keydown.escape="messageDialogOpen = false"
+                @keydown.ctrl.enter.prevent="sendQuickMessage"
               />
               <Button
                 type="submit"
