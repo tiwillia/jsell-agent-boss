@@ -3,6 +3,7 @@ import type { SpaceSummary, KnowledgeSpace, AgentStatus } from '@/types'
 import { STATUS_DISPLAY } from '@/types'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { relativeTime } from '@/composables/useTime'
 import {
   Sidebar,
   SidebarContent,
@@ -234,12 +235,17 @@ function statusLabel(status: string): string {
                   <SidebarMenuButton
                     :data-active="space.name === selectedSpace"
                     :aria-current="space.name === selectedSpace ? 'true' : undefined"
+                    class="flex flex-col items-start h-auto py-2 gap-0.5"
                     @click="handleSelectSpace(space.name)"
                   >
-                    <span class="truncate">{{ space.name }}</span>
+                    <span class="truncate w-full leading-tight">{{ space.name }}</span>
+                    <span class="text-[10px] text-muted-foreground leading-none">{{ relativeTime(space.updated_at) }}</span>
                   </SidebarMenuButton>
                 </TooltipTrigger>
-                <TooltipContent side="right">{{ space.name }}</TooltipContent>
+                <TooltipContent side="right">
+                  <div>{{ space.name }}</div>
+                  <div class="text-xs text-muted-foreground">Last active: {{ relativeTime(space.updated_at) }}</div>
+                </TooltipContent>
               </Tooltip>
               <Tooltip v-if="spaceAttentionCount(space) > 0">
                 <TooltipTrigger as-child>
