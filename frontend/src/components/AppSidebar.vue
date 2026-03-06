@@ -29,6 +29,7 @@ const props = defineProps<{
   currentSpace: KnowledgeSpace | null
   selectedSpace: string
   selectedAgent: string
+  broadcasting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -397,6 +398,7 @@ function statusLabel(status: string): string {
             variant="outline"
             size="sm"
             class="w-full"
+            :disabled="broadcasting"
             @click="emit('broadcast')"
           >
             <Radio class="size-4" /> Nudge {{ currentSpace.name }}

@@ -49,6 +49,7 @@ import AgentAvatar from './AgentAvatar.vue'
 const props = defineProps<{
   space: KnowledgeSpace
   tmuxStatus: Record<string, TmuxAgentStatus> | null
+  broadcasting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -259,7 +260,7 @@ const activeSections = computed(() => [
             <Button
               variant="outline"
               size="sm"
-              :disabled="agentCount === 0"
+              :disabled="agentCount === 0 || broadcasting"
               @click="emit('broadcast')"
             >
               <Radio class="size-4" />
