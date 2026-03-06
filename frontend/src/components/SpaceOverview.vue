@@ -178,28 +178,31 @@ function freshnessDotClass(dateStr: string): string {
   return 'bg-amber-400/60'
 }
 
-// Track recently-updated agents for flash animation
+// Track recently-updated agents for flash animation.
+// Shallow-watch only updated_at timestamps instead of { deep: true } on the full
+// agents map — avoids recursively diffing all nested arrays on every update.
 const recentlyUpdated = ref<Set<string>>(new Set())
-const lastSeenTimestamps = ref<Record<string, string>>({})
 
-watch(
-  () => props.space.agents,
-  (agents) => {
-    for (const [name, agent] of Object.entries(agents)) {
-      const prev = lastSeenTimestamps.value[name]
-      if (prev && prev !== agent.updated_at) {
-        recentlyUpdated.value.add(name)
-        setTimeout(() => {
-          recentlyUpdated.value.delete(name)
-        }, 2000)
-        // Refresh inbox when an agent updates — new questions/blockers may have arrived
-        inboxRef.value?.refresh()
-      }
-      lastSeenTimestamps.value[name] = agent.updated_at
+const agentTimestamps = computed<Record<string, string>>(() => {
+  const result: Record<string, string> = {}
+  for (const [name, agent] of Object.entries(props.space.agents)) {
+    result[name] = agent.updated_at
+  }
+  return result
+})
+
+watch(agentTimestamps, (timestamps, prev) => {
+  for (const [name, ts] of Object.entries(timestamps)) {
+    if (prev[name] && prev[name] !== ts) {
+      recentlyUpdated.value.add(name)
+      setTimeout(() => {
+        recentlyUpdated.value.delete(name)
+      }, 2000)
+      // Refresh inbox when an agent updates — new questions/blockers may have arrived
+      inboxRef.value?.refresh()
     }
-  },
-  { deep: true },
-)
+  }
+})
 
 /** Check if an agent has any attention items */
 function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boolean {
