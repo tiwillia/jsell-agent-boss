@@ -32,6 +32,7 @@ type sseClient struct {
 type Server struct {
 	port            string
 	dataDir         string
+	frontendDir     string
 	spaces          map[string]*KnowledgeSpace
 	mu              sync.RWMutex
 	httpServer      *http.Server
@@ -68,6 +69,14 @@ func NewServer(port, dataDir string) *Server {
 		nudgePending:    make(map[string]time.Time),
 		nudgeInFlight:   make(map[string]bool),
 	}
+}
+
+// SetFrontendDir configures the server to serve a Vue SPA from the given
+// directory (typically frontend/dist). When set and the directory exists,
+// the root "/" serves index.html from that directory and /assets/ serves
+// Vite-built static files. When empty, the legacy mission-control.html is used.
+func (s *Server) SetFrontendDir(dir string) {
+	s.frontendDir = dir
 }
 
 func (s *Server) Running() bool {
@@ -122,9 +131,16 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/mc2", s.handleMC2)
-	// Static file server for CSS, JS, etc.
+	// Static file server for CSS, JS, etc. (legacy dashboard)
 	mux.Handle("/css/", http.StripPrefix("/", http.FileServer(http.Dir("internal/coordinator/static"))))
 	mux.Handle("/js/", http.StripPrefix("/", http.FileServer(http.Dir("internal/coordinator/static"))))
+
+	// Serve Vue frontend assets when frontendDir is configured
+	if s.frontendDir != "" {
+		if info, err := os.Stat(s.frontendDir); err == nil && info.IsDir() {
+			mux.Handle("/assets/", http.FileServer(http.Dir(s.frontendDir)))
+		}
+	}
 	mux.HandleFunc("/spaces", s.handleListSpaces)
 	mux.HandleFunc("/spaces/", s.handleSpaceRoute)
 	mux.HandleFunc("/events", s.handleSSE)
@@ -306,6 +322,21 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Serve Vue SPA index.html when frontendDir is configured and exists
+	if s.frontendDir != "" {
+		indexPath := filepath.Join(s.frontendDir, "index.html")
+		if _, err := os.Stat(indexPath); err == nil {
+			content, err := os.ReadFile(indexPath)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(content)
+			return
+		}
+	}
+	// Fallback to legacy dashboard
 	s.serveHTMLFile(w, r, "mission-control.html")
 }
 
