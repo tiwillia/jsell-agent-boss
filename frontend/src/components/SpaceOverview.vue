@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { KnowledgeSpace, TmuxAgentStatus } from '@/types'
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -189,6 +189,27 @@ function freshnessDotClass(dateStr: string): string {
   return 'bg-amber-400/60'
 }
 
+// Track recently-updated agents for flash animation
+const recentlyUpdated = ref<Set<string>>(new Set())
+const lastSeenTimestamps = ref<Record<string, string>>({})
+
+watch(
+  () => props.space.agents,
+  (agents) => {
+    for (const [name, agent] of Object.entries(agents)) {
+      const prev = lastSeenTimestamps.value[name]
+      if (prev && prev !== agent.updated_at) {
+        recentlyUpdated.value.add(name)
+        setTimeout(() => {
+          recentlyUpdated.value.delete(name)
+        }, 2000)
+      }
+      lastSeenTimestamps.value[name] = agent.updated_at
+    }
+  },
+  { deep: true },
+)
+
 /** Check if an agent has any attention items */
 function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boolean {
   return (agent.questions?.length ?? 0) > 0 || (agent.blockers?.length ?? 0) > 0
@@ -259,6 +280,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                     ? 'border-l-4 border-l-amber-500 shadow-md shadow-amber-500/5'
                     : '',
                 agent.status === 'done' ? 'opacity-70' : '',
+                recentlyUpdated.has(name) ? 'ring-2 ring-primary/50 animate-pulse' : '',
               ]"
               :aria-label="`Agent ${name}, status: ${agent.status}${agent.summary ? ', ' + agent.summary : ''}`"
               @click="emit('select-agent', name)"
@@ -303,6 +325,11 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                 <!-- Row 2: Summary — THE HERO -->
                 <p class="text-sm font-text text-foreground/90 leading-relaxed line-clamp-4">
                   {{ agent.summary || 'No summary available' }}
+                </p>
+
+                <!-- Row 2b: Next Steps (if present) -->
+                <p v-if="agent.next_steps" class="text-xs font-text text-muted-foreground leading-snug line-clamp-2 italic">
+                  <span class="not-italic font-medium text-foreground/70">Next:</span> {{ agent.next_steps }}
                 </p>
 
                 <!-- Row 3: Metadata — badges on left, timestamp on right -->
