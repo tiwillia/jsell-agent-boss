@@ -65,6 +65,10 @@ function handleQuestionReply(index: number, questionText: string) {
   questionReplying.value[index] = true
   emit('reply-to-question', props.agentName, index, questionText, text)
   questionReplyTexts.value[index] = ''
+  // Reset loading state after a reasonable timeout
+  setTimeout(() => {
+    questionReplying.value[index] = false
+  }, 2000)
 }
 
 function handleBlockerReply(index: number, blockerText: string) {
@@ -73,6 +77,10 @@ function handleBlockerReply(index: number, blockerText: string) {
   blockerReplying.value[index] = true
   emit('reply-to-blocker', props.agentName, index, blockerText, text)
   blockerReplyTexts.value[index] = ''
+  // Reset loading state after a reasonable timeout
+  setTimeout(() => {
+    blockerReplying.value[index] = false
+  }, 2000)
 }
 
 function relativeTime(dateStr: string): string {
@@ -166,7 +174,7 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
   <ScrollArea class="h-full">
     <div class="p-6 space-y-6 max-w-4xl">
       <!-- Header -->
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="space-y-1">
           <div class="flex items-center gap-3">
             <AgentAvatar :name="agentName" :size="36" />
@@ -233,60 +241,7 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
 
       <Separator />
 
-      <!-- Summary -->
-      <section v-if="agent.summary" aria-label="Agent summary">
-        <h2 class="text-sm font-medium text-muted-foreground mb-1">Summary</h2>
-        <p class="font-text leading-relaxed">{{ agent.summary }}</p>
-      </section>
-
-      <!-- Test count -->
-      <div v-if="agent.test_count != null" class="text-sm font-text text-muted-foreground">
-        Tests: <span class="font-mono">{{ agent.test_count }}</span>
-      </div>
-
-      <!-- Items -->
-      <section v-if="hasItems" aria-label="Work items">
-        <h2 class="text-sm font-medium text-muted-foreground mb-2">Items</h2>
-        <ul class="list-disc list-inside space-y-1 font-text text-sm">
-          <li v-for="(item, i) in agent.items" :key="i">{{ item }}</li>
-        </ul>
-      </section>
-
-      <!-- Sections -->
-      <div v-if="hasSections" class="space-y-4">
-        <section v-for="(section, si) in agent.sections" :key="si" :aria-label="section.title">
-          <h3 class="text-sm font-semibold mb-2">{{ section.title }}</h3>
-          <ul v-if="section.items?.length" class="list-disc list-inside space-y-1 font-text text-sm mb-2">
-            <li v-for="(item, ii) in section.items" :key="ii">{{ item }}</li>
-          </ul>
-          <!-- Table -->
-          <div v-if="section.table" class="overflow-x-auto rounded border">
-            <table class="w-full text-sm font-text" :aria-label="`${section.title} table`">
-              <thead>
-                <tr class="border-b bg-muted/50">
-                  <th
-                    v-for="(header, hi) in section.table.headers"
-                    :key="hi"
-                    scope="col"
-                    class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
-                  >
-                    {{ header }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, ri) in section.table.rows" :key="ri" class="border-b last:border-0">
-                  <td v-for="(cell, ci) in row" :key="ci" class="px-3 py-2">
-                    {{ cell }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-
-      <!-- Questions & Blockers — Actionable Inbox -->
+      <!-- Questions & Blockers — Actionable Inbox (elevated: shown first when present) -->
       <section v-if="hasQuestions || hasBlockers" class="space-y-4" aria-label="Questions and blockers">
         <div class="flex items-center gap-2">
           <h2 class="text-sm font-semibold text-foreground">Needs Your Attention</h2>
@@ -396,6 +351,59 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
         </div>
       </section>
 
+      <!-- Summary -->
+      <section v-if="agent.summary" aria-label="Agent summary">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Summary</h2>
+        <p class="font-text leading-relaxed">{{ agent.summary }}</p>
+      </section>
+
+      <!-- Test count -->
+      <div v-if="agent.test_count != null" class="text-sm font-text text-muted-foreground">
+        Tests: <span class="font-mono">{{ agent.test_count }}</span>
+      </div>
+
+      <!-- Items -->
+      <section v-if="hasItems" aria-label="Work items">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Items</h2>
+        <ul class="list-disc list-inside space-y-1 font-text text-sm">
+          <li v-for="(item, i) in agent.items" :key="i">{{ item }}</li>
+        </ul>
+      </section>
+
+      <!-- Sections -->
+      <div v-if="hasSections" class="space-y-4">
+        <section v-for="(section, si) in agent.sections" :key="si" :aria-label="section.title">
+          <h3 class="text-sm font-semibold mb-2">{{ section.title }}</h3>
+          <ul v-if="section.items?.length" class="list-disc list-inside space-y-1 font-text text-sm mb-2">
+            <li v-for="(item, ii) in section.items" :key="ii">{{ item }}</li>
+          </ul>
+          <!-- Table -->
+          <div v-if="section.table" class="overflow-x-auto rounded border">
+            <table class="w-full text-sm font-text" :aria-label="`${section.title} table`">
+              <thead>
+                <tr class="border-b bg-muted/50">
+                  <th
+                    v-for="(header, hi) in section.table.headers"
+                    :key="hi"
+                    scope="col"
+                    class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                  >
+                    {{ header }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, ri) in section.table.rows" :key="ri" class="border-b last:border-0">
+                  <td v-for="(cell, ci) in row" :key="ci" class="px-3 py-2">
+                    {{ cell }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
       <!-- Dismiss without reply confirmation AlertDialog -->
       <AlertDialog v-model:open="dismissDialogOpen">
         <AlertDialogContent>
@@ -434,19 +442,19 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
 
       <!-- Next Steps -->
       <section v-if="agent.next_steps" aria-label="Next steps">
-        <h2 class="text-sm font-medium text-muted-foreground mb-1">Next Steps</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Next Steps</h2>
         <p class="font-text text-sm leading-relaxed whitespace-pre-wrap">{{ agent.next_steps }}</p>
       </section>
 
       <!-- Free Text -->
       <section v-if="agent.free_text" aria-label="Agent notes">
-        <h2 class="text-sm font-medium text-muted-foreground mb-1">Notes</h2>
-        <p class="font-text text-sm leading-relaxed whitespace-pre-wrap bg-muted/30 rounded p-3 font-mono text-xs">{{ agent.free_text }}</p>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Notes</h2>
+        <p class="text-sm leading-relaxed whitespace-pre-wrap bg-muted/30 rounded p-3 font-mono text-xs">{{ agent.free_text }}</p>
       </section>
 
       <!-- Documents -->
       <section v-if="agent.documents?.length" aria-label="Agent documents">
-        <h2 class="text-sm font-medium text-muted-foreground mb-2">Documents</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Documents</h2>
         <nav class="space-y-1" aria-label="Document links">
           <a
             v-for="doc in agent.documents"
@@ -466,7 +474,7 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
 
       <!-- Tmux Controls -->
       <section class="space-y-3" aria-label="Tmux session controls">
-        <h2 class="text-sm font-medium text-muted-foreground">Controls</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Controls</h2>
 
         <!-- Approval button -->
         <div v-if="tmuxStatus?.needs_approval" class="space-y-2">
@@ -546,7 +554,7 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
       <!-- Messages -->
       <section class="mt-6" aria-label="Agent messages">
         <Separator class="mb-4" />
-        <h2 class="text-sm font-medium text-muted-foreground mb-3">Messages</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Messages</h2>
         <div class="h-[350px] rounded-xl border bg-card text-card-foreground flex flex-col overflow-hidden">
           <AgentMessages
             :messages="agent.messages ?? []"
