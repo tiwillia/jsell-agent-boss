@@ -311,7 +311,7 @@ const activeSections = computed(() => [
                         : agent.questions?.length
                           ? 'border-l-4 border-l-amber-500 shadow-md shadow-amber-500/5'
                           : '',
-                      recentlyUpdated.has(name) ? 'ring-2 ring-primary/50 animate-pulse' : '',
+                      recentlyUpdated.has(name) ? 'ring-2 ring-primary/40 transition-shadow' : '',
                     ]"
                     :aria-label="`Agent ${name}, status: ${agent.status}${agent.summary ? ', ' + agent.summary : ''}`"
                     @click="emit('select-agent', name)"
