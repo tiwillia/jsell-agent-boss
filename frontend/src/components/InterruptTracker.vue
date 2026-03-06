@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import type { Interrupt, InterruptMetrics } from '@/types'
 import { api } from '@/api/client'
+import { relativeTime, formatFullDate, formatWaitTime } from '@/composables/useTime'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -87,27 +88,6 @@ const resolvedTodayCount = computed(() => {
   }).length
 })
 
-function formatWaitTime(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  return `${(seconds / 3600).toFixed(1)}h`
-}
-
-function relativeTime(dateStr: string): string {
-  const now = Date.now()
-  const then = new Date(dateStr).getTime()
-  const diff = now - then
-  if (diff < 0) return 'just now'
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
 function waitingLabel(dateStr: string): string {
   const now = Date.now()
   const then = new Date(dateStr).getTime()
@@ -117,10 +97,6 @@ function waitingLabel(dateStr: string): string {
   if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ${minutes % 60}m`
-}
-
-function formatFullDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString()
 }
 
 // Returns additional CSS classes for a pending item based on how long it has waited

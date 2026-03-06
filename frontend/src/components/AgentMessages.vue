@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SendHorizontal, MessageCircle, Check } from 'lucide-vue-next'
 import AgentAvatar from './AgentAvatar.vue'
+import { formatFullDate } from '@/composables/useTime'
 
 const props = defineProps<{
   messages: AgentMessage[]
@@ -23,10 +24,6 @@ const scrollRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 function formatTime(timestamp: string): string {
   const d = new Date(timestamp)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatFullDate(timestamp: string): string {
-  return new Date(timestamp).toLocaleString()
 }
 
 function formatDay(timestamp: string): string {
