@@ -9,6 +9,14 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/s
 import { Separator } from '@/components/ui/separator'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SpaceOverview from '@/components/SpaceOverview.vue'
 import AgentDetail from '@/components/AgentDetail.vue'
@@ -35,6 +43,13 @@ const broadcasting = ref(false)
 const sse = useSSE()
 const eventLogRef = ref<InstanceType<typeof EventLog> | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+// ── Keyboard shortcut state ────────────────────────────────────────
+const showHelpOverlay = ref(false)
+const showMessageDialog = ref(false)
+const kbMessageText = ref('')
+const kbMessageSender = ref('boss')
+const kbMessageSending = ref(false)
 
 // ── Route-derived selection ────────────────────────────────────────
 const selectedSpace = computed(() => {
@@ -396,6 +411,106 @@ function stopPolling() {
   }
 }
 
+// ── Keyboard shortcuts ─────────────────────────────────────────────
+const sortedAgentNames = computed<string[]>(() => {
+  if (!currentSpace.value) return []
+  return Object.keys(currentSpace.value.agents).sort((a, b) => a.localeCompare(b))
+})
+
+function isInputFocused(): boolean {
+  const el = document.activeElement
+  if (!el) return false
+  const tag = el.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  // Never intercept when typing in an input/textarea
+  if (isInputFocused()) return
+
+  // '?' — toggle help overlay
+  if (e.key === '?') {
+    e.preventDefault()
+    showHelpOverlay.value = !showHelpOverlay.value
+    return
+  }
+
+  // Escape — close overlays or go back from agent detail to space overview
+  if (e.key === 'Escape') {
+    if (showHelpOverlay.value) {
+      showHelpOverlay.value = false
+      return
+    }
+    if (showMessageDialog.value) {
+      showMessageDialog.value = false
+      return
+    }
+    if (selectedAgent.value && selectedSpace.value) {
+      router.push('/' + selectedSpace.value)
+    }
+    return
+  }
+
+  // '/' — focus search input if present
+  if (e.key === '/') {
+    const searchEl = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder*="earch"], input[placeholder*="ilter"]')
+    if (searchEl) {
+      e.preventDefault()
+      searchEl.focus()
+    }
+    return
+  }
+
+  // j/k — navigate between agents in the sidebar
+  if (e.key === 'j' || e.key === 'k') {
+    if (!selectedSpace.value || sortedAgentNames.value.length === 0) return
+    e.preventDefault()
+    const names = sortedAgentNames.value
+    const currentIdx = selectedAgent.value ? names.indexOf(selectedAgent.value) : -1
+    let nextIdx: number
+    if (e.key === 'j') {
+      nextIdx = currentIdx < names.length - 1 ? currentIdx + 1 : 0
+    } else {
+      nextIdx = currentIdx > 0 ? currentIdx - 1 : names.length - 1
+    }
+    const nextAgent = names[nextIdx]
+    if (nextAgent) {
+      router.push('/' + selectedSpace.value + '/' + nextAgent)
+    }
+    return
+  }
+
+  // 'n' — nudge the currently selected agent
+  if (e.key === 'n') {
+    if (!selectedAgent.value) return
+    e.preventDefault()
+    handleBroadcastAgent()
+    return
+  }
+
+  // 'm' — open message dialog for current agent
+  if (e.key === 'm') {
+    if (!selectedAgent.value) return
+    e.preventDefault()
+    kbMessageText.value = ''
+    kbMessageSender.value = 'boss'
+    showMessageDialog.value = true
+    return
+  }
+}
+
+async function handleKbSendMessage() {
+  if (!kbMessageText.value.trim() || !selectedAgent.value || !selectedSpace.value) return
+  kbMessageSending.value = true
+  try {
+    await handleSendMessage(kbMessageText.value.trim(), kbMessageSender.value || 'boss')
+    showMessageDialog.value = false
+    kbMessageText.value = ''
+  } finally {
+    kbMessageSending.value = false
+  }
+}
+
 // ── Lifecycle ──────────────────────────────────────────────────────
 onMounted(async () => {
   loading.value = true
@@ -403,6 +518,7 @@ onMounted(async () => {
   loading.value = false
   setupSSE()
   startPolling()
+  document.addEventListener('keydown', handleKeydown)
 
   if (selectedSpace.value) {
     // Route already has a space — load its data and connect SSE
@@ -421,6 +537,7 @@ onMounted(async () => {
 onUnmounted(() => {
   sse.disconnect()
   stopPolling()
+  document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -594,5 +711,81 @@ onUnmounted(() => {
         />
       </SidebarInset>
     </SidebarProvider>
+    <!-- Keyboard shortcuts help overlay -->
+    <Dialog :open="showHelpOverlay" @update:open="showHelpOverlay = $event">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Keyboard Shortcuts</DialogTitle>
+          <DialogDescription>Navigate the dashboard without lifting your hands from the keyboard.</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-1 py-2 font-text text-sm">
+          <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 items-center">
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">?</kbd>
+            <span>Show / hide this help overlay</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">j</kbd>
+            <span>Select next agent in sidebar</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">k</kbd>
+            <span>Select previous agent in sidebar</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">n</kbd>
+            <span>Nudge currently selected agent</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">m</kbd>
+            <span>Message currently selected agent</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">Esc</kbd>
+            <span>Go back to space overview</span>
+
+            <kbd class="px-2 py-0.5 rounded border bg-muted text-muted-foreground font-mono text-xs">/</kbd>
+            <span>Focus search / filter input</span>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showHelpOverlay = false">Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Keyboard-triggered message dialog -->
+    <Dialog :open="showMessageDialog" @update:open="showMessageDialog = $event">
+      <DialogContent class="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Message {{ selectedAgent }}</DialogTitle>
+          <DialogDescription>Send a message to this agent. It will appear in their Messages section on next check-in.</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3 py-1">
+          <div class="space-y-1">
+            <label for="kb-sender" class="text-xs font-medium text-muted-foreground">From</label>
+            <input
+              id="kb-sender"
+              v-model="kbMessageSender"
+              type="text"
+              placeholder="boss"
+              class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div class="space-y-1">
+            <label for="kb-message" class="text-xs font-medium text-muted-foreground">Message</label>
+            <textarea
+              id="kb-message"
+              v-model="kbMessageText"
+              rows="4"
+              placeholder="Type your message…"
+              class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+              @keydown.ctrl.enter.prevent="handleKbSendMessage"
+            />
+            <p class="text-xs text-muted-foreground">Ctrl+Enter to send</p>
+          </div>
+        </div>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" size="sm" @click="showMessageDialog = false">Cancel</Button>
+          <Button size="sm" :disabled="!kbMessageText.trim() || kbMessageSending" @click="handleKbSendMessage">
+            {{ kbMessageSending ? 'Sending…' : 'Send' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </TooltipProvider>
 </template>

@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { SendHorizontal } from 'lucide-vue-next'
+import { SendHorizontal, MessageCircle, Check } from 'lucide-vue-next'
 import AgentAvatar from './AgentAvatar.vue'
 
 const props = defineProps<{
@@ -20,27 +20,6 @@ const emit = defineEmits<{
 const messageText = ref('')
 const scrollRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 
-// Sender color palette — subtle background tints
-const senderColors: Record<string, string> = {}
-const colorPalette = [
-  'bg-blue-500/10 border-blue-500/20',
-  'bg-purple-500/10 border-purple-500/20',
-  'bg-amber-500/10 border-amber-500/20',
-  'bg-emerald-500/10 border-emerald-500/20',
-  'bg-pink-500/10 border-pink-500/20',
-  'bg-cyan-500/10 border-cyan-500/20',
-  'bg-rose-500/10 border-rose-500/20',
-  'bg-indigo-500/10 border-indigo-500/20',
-]
-
-function getSenderColor(sender: string): string {
-  if (!(sender in senderColors)) {
-    const idx = Object.keys(senderColors).length % colorPalette.length
-    senderColors[sender] = colorPalette[idx]!
-  }
-  return senderColors[sender]!
-}
-
 function formatTime(timestamp: string): string {
   const d = new Date(timestamp)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -48,6 +27,20 @@ function formatTime(timestamp: string): string {
 
 function formatFullDate(timestamp: string): string {
   return new Date(timestamp).toLocaleString()
+}
+
+function formatDay(timestamp: string): string {
+  const d = new Date(timestamp)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+function getDateKey(timestamp: string): string {
+  return new Date(timestamp).toDateString()
 }
 
 function send() {
@@ -64,7 +57,6 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-// Auto-scroll when new messages arrive
 watch(
   () => props.messages.length,
   async () => {
@@ -76,10 +68,51 @@ watch(
   },
 )
 
-const sortedMessages = computed(() => {
-  return [...props.messages].sort(
+type MessageEntry =
+  | {
+      type: 'message'
+      msg: AgentMessage
+      isBoss: boolean
+      isFirstInGroup: boolean
+      isLastInGroup: boolean
+    }
+  | { type: 'day-separator'; label: string; key: string }
+
+const enrichedMessages = computed((): MessageEntry[] => {
+  const sorted = [...props.messages].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   )
+
+  const result: MessageEntry[] = []
+  let lastDateKey = ''
+
+  for (let i = 0; i < sorted.length; i++) {
+    const msg = sorted[i]!
+    const dateKey = getDateKey(msg.timestamp)
+
+    if (dateKey !== lastDateKey) {
+      result.push({ type: 'day-separator', label: formatDay(msg.timestamp), key: dateKey })
+      lastDateKey = dateKey
+    }
+
+    const isBoss = msg.sender === 'boss'
+    const prevMsg = sorted[i - 1]
+    const nextMsg = sorted[i + 1]
+    const prevSame =
+      prevMsg && prevMsg.sender === msg.sender && getDateKey(prevMsg.timestamp) === dateKey
+    const nextSame =
+      nextMsg && nextMsg.sender === msg.sender && getDateKey(nextMsg.timestamp) === dateKey
+
+    result.push({
+      type: 'message',
+      msg,
+      isBoss,
+      isFirstInGroup: !prevSame,
+      isLastInGroup: !nextSame,
+    })
+  }
+
+  return result
 })
 </script>
 
@@ -87,40 +120,117 @@ const sortedMessages = computed(() => {
   <div class="flex flex-col h-full min-h-0" role="log" aria-label="Message history">
     <!-- Messages area -->
     <ScrollArea ref="scrollRef" class="flex-1 min-h-0 px-4 py-3">
-      <div v-if="sortedMessages.length === 0" class="flex flex-col items-center justify-center h-32 text-muted-foreground font-text text-sm text-center gap-1">
-        <p>No messages yet</p>
-        <p class="text-xs">Send a message below to communicate with this agent</p>
-      </div>
-      <div v-else class="space-y-3" aria-live="polite">
-        <div
-          v-for="msg in sortedMessages"
-          :key="msg.id"
-          :class="[
-            'rounded-lg border px-3 py-2 max-w-[85%]',
-            getSenderColor(msg.sender),
-          ]"
-          role="article"
-          :aria-label="`Message from ${msg.sender} at ${formatTime(msg.timestamp)}`"
-        >
-          <div class="flex items-center gap-2 mb-1">
-            <AgentAvatar :name="msg.sender" :size="20" />
-            <span class="text-xs font-medium">{{ msg.sender }}</span>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <time
-                  :datetime="msg.timestamp"
-                  class="text-xs text-muted-foreground ml-auto cursor-default"
-                >
-                  {{ formatTime(msg.timestamp) }}
-                </time>
-              </TooltipTrigger>
-              <TooltipContent>
-                {{ formatFullDate(msg.timestamp) }}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <p class="text-sm font-text leading-relaxed whitespace-pre-wrap">{{ msg.message }}</p>
+      <!-- Empty state -->
+      <div
+        v-if="enrichedMessages.length === 0"
+        class="flex flex-col items-center justify-center h-40 text-muted-foreground text-center gap-3"
+      >
+        <div class="rounded-full bg-muted p-3">
+          <MessageCircle class="size-6" />
         </div>
+        <div>
+          <p class="text-sm font-medium text-foreground">No messages yet</p>
+          <p class="text-xs mt-0.5">Start the conversation below</p>
+        </div>
+      </div>
+
+      <div v-else class="flex flex-col gap-0.5" aria-live="polite">
+        <template
+          v-for="entry in enrichedMessages"
+          :key="entry.type === 'day-separator' ? entry.key : entry.msg.id"
+        >
+          <!-- Day separator -->
+          <div v-if="entry.type === 'day-separator'" class="flex items-center gap-3 my-4">
+            <div class="flex-1 h-px bg-border" />
+            <span class="text-xs text-muted-foreground px-1 shrink-0">{{ entry.label }}</span>
+            <div class="flex-1 h-px bg-border" />
+          </div>
+
+          <!-- Message row -->
+          <div
+            v-else
+            :class="['flex items-end gap-2', entry.isBoss ? 'flex-row-reverse' : 'flex-row', entry.isFirstInGroup ? 'mt-3' : 'mt-0.5']"
+            role="article"
+            :aria-label="`Message from ${entry.msg.sender} at ${formatTime(entry.msg.timestamp)}`"
+          >
+            <!-- Avatar spacer / avatar (agent side only) -->
+            <div class="flex-shrink-0 w-7">
+              <AgentAvatar
+                v-if="!entry.isBoss && entry.isLastInGroup"
+                :name="entry.msg.sender"
+                :size="28"
+              />
+            </div>
+
+            <!-- Bubble + meta -->
+            <div
+              :class="[
+                'flex flex-col max-w-[72%]',
+                entry.isBoss ? 'items-end' : 'items-start',
+              ]"
+            >
+              <!-- Sender name — first in group, agent side only -->
+              <span
+                v-if="entry.isFirstInGroup && !entry.isBoss"
+                class="text-xs text-muted-foreground mb-1 ml-1"
+              >
+                {{ entry.msg.sender }}
+              </span>
+
+              <!-- Bubble -->
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <div
+                    :class="[
+                      'px-3 py-2 text-sm font-text leading-relaxed whitespace-pre-wrap break-words',
+                      entry.isBoss
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-foreground',
+                      // Rounded corners — pinched corner toward the avatar
+                      entry.isBoss
+                        ? (entry.isFirstInGroup && entry.isLastInGroup
+                            ? 'rounded-2xl rounded-br-md'
+                            : entry.isFirstInGroup
+                              ? 'rounded-2xl rounded-br-md'
+                              : entry.isLastInGroup
+                                ? 'rounded-2xl rounded-tr-md'
+                                : 'rounded-xl rounded-r-md')
+                        : (entry.isFirstInGroup && entry.isLastInGroup
+                            ? 'rounded-2xl rounded-bl-md'
+                            : entry.isFirstInGroup
+                              ? 'rounded-2xl rounded-bl-md'
+                              : entry.isLastInGroup
+                                ? 'rounded-2xl rounded-tl-md'
+                                : 'rounded-xl rounded-l-md'),
+                    ]"
+                  >{{ entry.msg.message }}</div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {{ formatFullDate(entry.msg.timestamp) }}
+                </TooltipContent>
+              </Tooltip>
+
+              <!-- Timestamp + delivered (last message in group only) -->
+              <div
+                v-if="entry.isLastInGroup"
+                :class="[
+                  'flex items-center gap-1 mt-1 px-1',
+                  entry.isBoss ? 'flex-row' : 'flex-row',
+                ]"
+              >
+                <time :datetime="entry.msg.timestamp" class="text-xs text-muted-foreground">
+                  {{ formatTime(entry.msg.timestamp) }}
+                </time>
+                <span
+                  v-if="entry.isBoss"
+                  class="flex items-center gap-0.5 text-xs text-muted-foreground"
+                >
+                  <Check class="size-3" />Delivered
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </ScrollArea>
 
