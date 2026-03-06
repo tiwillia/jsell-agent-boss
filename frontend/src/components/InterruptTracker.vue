@@ -6,7 +6,7 @@ import { relativeTime, formatFullDate, formatWaitTime } from '@/composables/useT
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { RefreshCw, ShieldCheck, CornerDownLeft, Clock, CheckCheck } from 'lucide-vue-next'
 import {
@@ -424,21 +424,27 @@ onMounted(fetchData)
 
               <!-- Decision type: inline reply -->
               <template v-if="item.type === 'decision'">
-                <Input
-                  :model-value="replyTexts[item.id] ?? ''"
-                  placeholder="Type reply..."
-                  class="flex-1 h-8 text-sm font-text"
-                  @update:model-value="(v: string | number) => replyTexts[item.id] = String(v)"
-                  @keydown="handleReplyKeydown($event, item)"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  :disabled="acting[item.id] || !(replyTexts[item.id] ?? '').trim()"
-                  @click="handleReply(item)"
-                >
-                  <CornerDownLeft class="size-4" /> Reply
-                </Button>
+                <div class="flex-1 space-y-1.5">
+                  <Textarea
+                    :model-value="replyTexts[item.id] ?? ''"
+                    placeholder="Type reply… (Enter to send, Shift+Enter for newline)"
+                    class="min-h-[60px] text-sm font-text resize-y"
+                    :disabled="acting[item.id]"
+                    :aria-label="`Reply to ${item.type} from ${item.agent}`"
+                    @update:model-value="(v: string | number) => replyTexts[item.id] = String(v)"
+                    @keydown="handleReplyKeydown($event, item)"
+                  />
+                  <div class="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      :disabled="acting[item.id] || !(replyTexts[item.id] ?? '').trim()"
+                      @click="handleReply(item)"
+                    >
+                      <CornerDownLeft class="size-4" /> {{ acting[item.id] ? 'Sending…' : 'Reply' }}
+                    </Button>
+                    <span class="text-xs text-muted-foreground font-text">Enter to send</span>
+                  </div>
+                </div>
               </template>
 
               <!-- Feedback -->

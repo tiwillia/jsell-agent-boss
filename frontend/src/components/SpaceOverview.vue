@@ -62,6 +62,7 @@ const emit = defineEmits<{
 }>()
 
 const agentSearch = ref('')
+const activeTab = ref('agents')
 const deleteDialogOpen = ref(false)
 const deleteDialogAgent = ref<string | null>(null)
 const deleteSpaceDialogOpen = ref(false)
@@ -111,6 +112,12 @@ function handleCardKeydown(e: KeyboardEvent, name: string) {
     emit('select-agent', name)
   }
 }
+
+function switchToInbox() {
+  activeTab.value = 'inbox'
+}
+
+defineExpose({ switchToInbox })
 
 const sortedAgents = computed(() => {
   return Object.entries(props.space.agents).sort(([, a], [, b]) => {
@@ -300,6 +307,8 @@ const activeSections = computed(() => [
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
         <Input
           v-model="agentSearch"
+          type="search"
+          data-search-focus
           placeholder="Search agents by name or summary…"
           class="pl-9"
           aria-label="Filter agents by name or summary"
@@ -307,7 +316,7 @@ const activeSections = computed(() => [
       </div>
 
       <!-- Tabs: Agents / Inbox -->
-      <Tabs default-value="agents">
+      <Tabs v-model="activeTab">
         <TabsList>
           <TabsTrigger value="agents">Agents</TabsTrigger>
           <TabsTrigger value="inbox" class="gap-1.5" :aria-label="inboxPending > 0 ? 'Inbox, ' + inboxPending + ' pending items' : 'Inbox'">
@@ -724,6 +733,7 @@ const activeSections = computed(() => [
                 @keydown.escape="messageDialogOpen = false"
                 @keydown.ctrl.enter.prevent="sendQuickMessage"
               />
+              <p class="text-xs text-muted-foreground">Ctrl+Enter to send</p>
               <Button
                 type="submit"
                 size="sm"
