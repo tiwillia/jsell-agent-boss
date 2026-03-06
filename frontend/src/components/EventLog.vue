@@ -3,7 +3,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { api } from '@/api/client'
-import { XCircle } from 'lucide-vue-next'
+import { XCircle, ArrowDown } from 'lucide-vue-next'
 
 export interface EventLogEntry {
   id: number
@@ -40,6 +40,7 @@ const tick = ref(0)
 
 const MIN_HEIGHT = 100
 const MAX_HEIGHT = 600
+const STORAGE_KEY_HEIGHT = 'eventlog-panel-height'
 
 let nextId = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -150,7 +151,7 @@ function getBadgeClass(type: string): string {
   return badgeStyles[type] || badgeStyles.info!
 }
 
-// All distinct event types present in the log, with counts, sorted by count desc
+// All distinct event types present in the log, with counts, sorted by count descending
 const availableTypes = computed(() => {
   const counts = new Map<string, number>()
   for (const e of entries.value) {
@@ -159,7 +160,7 @@ const availableTypes = computed(() => {
   return [...counts.entries()].sort(([, a], [, b]) => b - a)
 })
 
-// Entries filtered by the active type selection and text search
+// Entries filtered by active type selection and text search
 const filteredEntries = computed(() => {
   let result = entries.value
   if (activeTypes.value.size > 0) {
@@ -179,7 +180,8 @@ function toggleTypeFilter(type: string) {
   const next = new Set(activeTypes.value)
   if (next.has(type)) {
     next.delete(type)
-  } else {
+  }
+  else {
     next.add(type)
   }
   activeTypes.value = next
@@ -187,6 +189,7 @@ function toggleTypeFilter(type: string) {
 
 function clearFilters() {
   activeTypes.value = new Set()
+  searchQuery.value = ''
 }
 
 // Load events from the server API (initial + periodic refresh)
@@ -204,7 +207,8 @@ async function loadEvents() {
         if (isOpen.value) {
           nextTick(scrollToBottom)
         }
-      } else {
+      }
+      else {
         // On refresh, only add new entries we haven't seen
         let added = false
         for (const r of raw) {
@@ -216,16 +220,12 @@ async function loadEvents() {
         }
         if (added) {
           if (!isOpen.value) {
-            // Auto-open on first live event arriving while panel is closed
-            if (entries.value.length <= 1) {
-              isOpen.value = true
-              nextTick(scrollToBottom)
-            } else {
-              unreadCount.value++
-            }
-          } else if (autoScroll.value) {
+            unreadCount.value++
+          }
+          else if (autoScroll.value) {
             scrollToBottom()
-          } else {
+          }
+          else {
             unreadCount.value++
           }
         }
@@ -235,13 +235,14 @@ async function loadEvents() {
         entries.value = entries.value.slice(-500)
       }
     }
-  } catch {
+  }
+  catch {
     // Silently fail — events are non-critical
   }
 }
 
 // Start periodic refresh of server events (catches things SSE doesn't push)
-// Only poll when panel is open — saves bandwidth when collapsed
+// Only polls when panel is open — saves bandwidth when collapsed
 function startRefresh() {
   stopRefresh()
   refreshTimer = setInterval(() => {
@@ -276,16 +277,19 @@ function pushSSEEvent(sseType: string, summary: string) {
   if (entries.value.length > 500) {
     entries.value = entries.value.slice(-500)
   }
-  // Flash the SSE indicator
+
+  // Flash the SSE live indicator
   sseActive.value = true
   if (sseActiveTimer !== null) clearTimeout(sseActiveTimer)
   sseActiveTimer = setTimeout(() => { sseActive.value = false }, 1500)
 
   if (!isOpen.value) {
     unreadCount.value++
-  } else if (autoScroll.value) {
+  }
+  else if (autoScroll.value) {
     scrollToBottom()
-  } else {
+  }
+  else {
     unreadCount.value++
   }
 }
@@ -293,6 +297,7 @@ function pushSSEEvent(sseType: string, summary: string) {
 function clearLog() {
   entries.value = []
   seenServerMessages.clear()
+  unreadCount.value = 0
 }
 
 function toggleOpen() {
@@ -314,6 +319,12 @@ function scrollToBottom() {
   })
 }
 
+function jumpToBottom() {
+  autoScroll.value = true
+  unreadCount.value = 0
+  scrollToBottom()
+}
+
 function handleScroll() {
   const el = scrollContainer.value
   if (!el) return
@@ -322,7 +333,35 @@ function handleScroll() {
   if (atBottom) unreadCount.value = 0
 }
 
-// ── Resize handling ──────────────────────────────────────────────
+// localStorage height persistence
+function loadStoredHeight() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_HEIGHT)
+    if (stored) {
+      const h = parseInt(stored, 10)
+      if (h >= MIN_HEIGHT && h <= MAX_HEIGHT) panelHeight.value = h
+    }
+  }
+  catch { /* ignore */ }
+}
+
+function saveHeight() {
+  try {
+    localStorage.setItem(STORAGE_KEY_HEIGHT, String(panelHeight.value))
+  }
+  catch { /* ignore */ }
+}
+
+// Keyboard shortcut: 'e' toggles the panel
+function handleKeydown(e: KeyboardEvent) {
+  const tag = (e.target as HTMLElement).tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
+  if (e.key === 'e' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    toggleOpen()
+  }
+}
+
+// Resize handling
 function startResize(e: MouseEvent | TouchEvent) {
   e.preventDefault()
   isResizing.value = true
@@ -341,6 +380,7 @@ function startResize(e: MouseEvent | TouchEvent) {
 
   function onEnd() {
     isResizing.value = false
+    saveHeight()
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onEnd)
     document.removeEventListener('touchmove', onMove as EventListener)
@@ -353,34 +393,28 @@ function startResize(e: MouseEvent | TouchEvent) {
   document.addEventListener('touchend', onEnd)
 }
 
-const RESIZE_STEP = 20
-
-function handleResizeKeydown(e: KeyboardEvent) {
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    panelHeight.value = Math.min(MAX_HEIGHT, panelHeight.value + RESIZE_STEP)
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    panelHeight.value = Math.max(MIN_HEIGHT, panelHeight.value - RESIZE_STEP)
-  }
-}
-
 // Reload events when space changes
 watch(() => props.spaceName, () => {
   entries.value = []
   seenServerMessages.clear()
   nextId = 0
   activeTypes.value = new Set()
+  searchQuery.value = ''
+  unreadCount.value = 0
   loadEvents()
 })
 
 onMounted(() => {
+  loadStoredHeight()
   loadEvents()
   startRefresh()
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   stopRefresh()
+  document.removeEventListener('keydown', handleKeydown)
+  if (sseActiveTimer !== null) clearTimeout(sseActiveTimer)
 })
 
 defineExpose({ pushSSEEvent, clearLog })
@@ -391,17 +425,9 @@ defineExpose({ pushSSEEvent, clearLog })
     <!-- Resize handle (only when open) -->
     <div
       v-if="isOpen"
-      class="h-3 cursor-ns-resize group shrink-0 flex items-center justify-center relative focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
-      tabindex="0"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="Resize event log panel. Use ArrowUp/ArrowDown to adjust height."
-      :aria-valuenow="panelHeight"
-      :aria-valuemin="MIN_HEIGHT"
-      :aria-valuemax="MAX_HEIGHT"
+      class="h-3 cursor-ns-resize group shrink-0 flex items-center justify-center relative"
       @mousedown.prevent="startResize"
       @touchstart.prevent="startResize"
-      @keydown="handleResizeKeydown"
     >
       <!-- Invisible wider hit area -->
       <div class="absolute inset-x-0 -top-1 -bottom-1" />
@@ -413,7 +439,8 @@ defineExpose({ pushSSEEvent, clearLog })
       <button
         class="flex items-center gap-2 hover:bg-accent/50 transition-colors cursor-pointer select-none rounded px-1 -mx-1"
         :aria-expanded="isOpen"
-        aria-label="Toggle event log panel"
+        aria-label="Toggle event log panel (E)"
+        title="Toggle event log (E)"
         @click="toggleOpen"
       >
         <!-- Terminal/console icon -->
@@ -433,6 +460,7 @@ defineExpose({ pushSSEEvent, clearLog })
           <line x1="12" x2="20" y1="19" y2="19" />
         </svg>
         <span class="font-semibold text-muted-foreground uppercase tracking-wider">Event Log</span>
+        <!-- Total count badge -->
         <Badge
           v-if="entryCount > 0"
           variant="secondary"
@@ -440,15 +468,21 @@ defineExpose({ pushSSEEvent, clearLog })
         >
           {{ entryCount }}
         </Badge>
+        <!-- Unread badge when panel is closed or user scrolled up -->
+        <span
+          v-if="unreadCount > 0"
+          class="inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-bold bg-primary text-primary-foreground animate-pulse"
+        >
+          +{{ unreadCount }}
+        </span>
+        <!-- Live SSE indicator dot -->
+        <span
+          v-if="sseActive"
+          class="size-1.5 rounded-full bg-green-500 animate-ping"
+          title="Live event received"
+        />
       </button>
       <div class="flex items-center gap-2">
-        <button
-          v-if="isOpen && !autoScroll"
-          class="text-[10px] text-amber-500 font-medium hover:text-amber-400 cursor-pointer"
-          @click="autoScroll = true; scrollToBottom()"
-        >
-          Auto-scroll paused — click to resume
-        </button>
         <Button
           v-if="isOpen && entries.length > 0"
           variant="ghost"
@@ -476,43 +510,60 @@ defineExpose({ pushSSEEvent, clearLog })
       </div>
     </div>
 
-    <!-- Filter chips (shown when open and multiple event types exist) -->
+    <!-- Search + filter toolbar (shown when open and there are events) -->
     <div
-      v-if="isOpen && availableTypes.length > 1"
+      v-if="isOpen && (availableTypes.length > 1 || searchQuery)"
       class="flex flex-wrap items-center gap-1 px-4 pb-2 shrink-0"
-      role="group"
-      aria-label="Filter by event type"
     >
-      <button
-        v-if="activeTypes.size > 0"
-        class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 cursor-pointer"
-        @click="clearFilters"
+      <!-- Text search input -->
+      <input
+        v-model="searchQuery"
+        type="search"
+        placeholder="Search events…"
+        class="h-5 rounded border border-border bg-background px-2 text-[10px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 w-32"
+        aria-label="Search event log"
       >
-        All
-      </button>
-      <button
-        v-for="[type, count] in availableTypes"
-        :key="type"
-        :class="[
-          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer',
-          activeTypes.size === 0 || activeTypes.has(type)
-            ? getBadgeClass(type)
-            : 'bg-muted/30 text-muted-foreground/40 border-border/30',
-        ]"
-        :aria-pressed="activeTypes.has(type)"
-        @click="toggleTypeFilter(type)"
+      <!-- Type filter chips -->
+      <div
+        v-if="availableTypes.length > 1"
+        class="flex flex-wrap items-center gap-1"
+        role="group"
+        aria-label="Filter by event type"
       >
-        {{ type }}
-        <span class="tabular-nums opacity-70 font-normal not-italic">{{ count }}</span>
-      </button>
+        <button
+          v-if="activeTypes.size > 0 || searchQuery"
+          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 cursor-pointer"
+          @click="clearFilters"
+        >
+          All
+        </button>
+        <button
+          v-for="[type, count] in availableTypes"
+          :key="type"
+          :class="[
+            'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer',
+            activeTypes.size === 0 || activeTypes.has(type)
+              ? getBadgeClass(type)
+              : 'bg-muted/30 text-muted-foreground/40 border-border/30',
+          ]"
+          :aria-pressed="activeTypes.has(type)"
+          @click="toggleTypeFilter(type)"
+        >
+          {{ type }}
+          <span class="tabular-nums opacity-70 font-normal not-italic">{{ count }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- Log content -->
     <div
       v-show="isOpen"
       ref="scrollContainer"
-      class="overflow-y-auto font-mono text-xs leading-relaxed border-t shrink-0 pb-3"
+      class="overflow-y-auto font-mono text-xs leading-relaxed border-t shrink-0 pb-3 relative"
       :style="{ height: panelHeight + 'px' }"
+      role="log"
+      aria-live="polite"
+      aria-label="Event log"
       @scroll="handleScroll"
     >
       <div v-if="filteredEntries.length === 0" class="text-center text-muted-foreground py-8 italic text-xs">
@@ -553,6 +604,9 @@ defineExpose({ pushSSEEvent, clearLog })
                 v-if="expandedId === entry.id"
                 class="py-1.5 whitespace-pre-wrap break-words leading-relaxed text-foreground/90 overflow-x-auto"
               >
+                <div class="text-muted-foreground text-[9px] mb-1 uppercase tracking-wider">
+                  {{ entry.timestamp }} · {{ entry.source }}
+                </div>
                 {{ entry.message }}
               </div>
               <div v-else class="truncate">
@@ -562,6 +616,18 @@ defineExpose({ pushSSEEvent, clearLog })
           </tr>
         </tbody>
       </table>
+
+      <!-- Sticky jump-to-bottom button inside scroll area -->
+      <button
+        v-if="!autoScroll"
+        class="sticky bottom-3 float-right mr-3 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[10px] font-semibold text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors cursor-pointer"
+        aria-label="Jump to latest event"
+        @click="jumpToBottom"
+      >
+        <ArrowDown class="size-3" />
+        <span v-if="unreadCount > 0">{{ unreadCount }} new</span>
+        <span v-else>Latest</span>
+      </button>
     </div>
   </div>
 </template>

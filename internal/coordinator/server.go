@@ -1254,7 +1254,7 @@ func (s *Server) handleSpaceEventsJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	events := s.RecentEvents(50)
+	events := s.RecentEvents(200)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(events)
 }
@@ -1713,16 +1713,39 @@ func (s *Server) recordDecisionInterrupts(spaceName, agentName string, update *A
 }
 
 func (s *Server) handleInterrupts(w http.ResponseWriter, r *http.Request, spaceName string) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		interrupts := s.interrupts.LoadAll(spaceName)
+		if interrupts == nil {
+			interrupts = []Interrupt{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(interrupts)
+	case http.MethodPost:
+		// Resolve a specific interrupt by ID.
+		var payload struct {
+			ID         string `json:"id"`
+			Answer     string `json:"answer"`
+			ResolvedBy string `json:"resolved_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.ID == "" {
+			http.Error(w, "body must contain {id, answer}", http.StatusBadRequest)
+			return
+		}
+		by := payload.ResolvedBy
+		if by == "" {
+			by = "human"
+		}
+		if err := s.interrupts.Resolve(spaceName, payload.ID, by, payload.Answer); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		s.logEvent(fmt.Sprintf("[%s] interrupt %s resolved by %s", spaceName, payload.ID, by))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "resolved", "id": payload.ID})
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
-	interrupts := s.interrupts.LoadAll(spaceName)
-	if interrupts == nil {
-		interrupts = []Interrupt{}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(interrupts)
 }
 
 func (s *Server) handleInterruptMetrics(w http.ResponseWriter, r *http.Request, spaceName string) {
