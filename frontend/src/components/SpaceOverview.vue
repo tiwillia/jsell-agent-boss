@@ -265,7 +265,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                           <AgentAvatar :name="name" :size="28" />
                           <!-- Status dot overlaid on bottom-right corner of avatar -->
                           <span
-                            class="absolute bottom-[-3px] right-[-3px] block size-3 rounded-full border-2 border-card"
+                            class="absolute bottom-0 right-0 translate-x-[25%] translate-y-[25%] block size-2.5 rounded-full border-2 border-card"
                             :class="{
                               'bg-green-500': freshness(agent.updated_at) === 'live' || freshness(agent.updated_at) === 'recent',
                               'bg-muted-foreground/40': freshness(agent.updated_at) === 'normal',
@@ -301,15 +301,15 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                   {{ agent.summary || 'No summary available' }}
                 </p>
 
-                <!-- Row 3: Metadata — compact, one line -->
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground font-text overflow-hidden">
-                  <span v-if="agent.phase" class="truncate max-w-[100px]" :title="`Phase: ${agent.phase}`">
+                <!-- Row 3: Metadata — compact, one line, no wrapping -->
+                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground font-text overflow-hidden flex-nowrap">
+                  <span v-if="agent.phase" class="truncate max-w-[80px]" :title="`Phase: ${agent.phase}`">
                     {{ agent.phase }}
                   </span>
-                  <span v-if="agent.phase && (agent.branch || agent.pr)" class="text-border">·</span>
+                  <span v-if="agent.phase && (agent.branch || agent.pr)" class="shrink-0 text-border">·</span>
                   <Tooltip v-if="agent.branch">
                     <TooltipTrigger as-child>
-                      <span class="inline-flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded text-[10px] truncate max-w-[140px] cursor-default">
+                      <span class="inline-flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded text-[10px] truncate max-w-[100px] cursor-default">
                         <GitBranch class="size-3 shrink-0" />
                         {{ agent.branch }}
                       </span>
@@ -324,17 +324,16 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                     :href="agent.pr"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="inline-flex items-center gap-0.5 text-primary/70 hover:text-primary transition-colors"
+                    class="inline-flex items-center gap-0.5 text-primary/70 hover:text-primary transition-colors shrink-0"
                     :title="agent.pr"
                     @click.stop
                   >
                     <ExternalLink class="size-3" />
                     PR
                   </a>
-                  <span v-if="agent.branch || agent.phase || agent.pr" class="text-border">·</span>
                   <Tooltip>
                     <TooltipTrigger as-child>
-                      <span class="inline-flex items-center gap-1 cursor-default whitespace-nowrap shrink-0">
+                      <span class="inline-flex items-center gap-1 cursor-default whitespace-nowrap shrink-0 ml-auto">
                         <Clock class="size-3 shrink-0" />
                         {{ relativeTime(agent.updated_at) }}
                       </span>
@@ -343,62 +342,31 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                   </Tooltip>
                 </div>
 
-                <!-- Row 4: Attention banner (only if questions/blockers) -->
+                <!-- Row 4: Compact attention indicator (single line, no height bloat) -->
                 <div
                   v-if="hasAttention(agent)"
-                  class="space-y-1.5"
+                  class="flex items-center gap-1.5 text-[11px] overflow-hidden"
                   @click.stop
                 >
-                  <!-- Blocker banner -->
-                  <div
-                    v-if="agent.blockers?.length"
-                    class="flex items-start gap-2 rounded-md bg-red-500/10 border border-red-500/20 px-3 py-2"
+                  <AlertTriangle v-if="agent.blockers?.length" class="size-3 shrink-0 text-red-500" />
+                  <span v-if="agent.blockers?.length" class="text-red-600 dark:text-red-400 truncate">
+                    {{ agent.blockers.length }} blocker{{ agent.blockers.length !== 1 ? 's' : '' }}: {{ agent.blockers[0] }}
+                  </span>
+                  <span v-if="agent.blockers?.length && agent.questions?.length" class="shrink-0 text-border">·</span>
+                  <HelpCircle v-if="agent.questions?.length" class="size-3 shrink-0 text-amber-500" />
+                  <span v-if="agent.questions?.length" class="text-amber-600 dark:text-amber-400 truncate">
+                    {{ agent.questions.length }} question{{ agent.questions.length !== 1 ? 's' : '' }}: {{ agent.questions[0] }}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-5 px-1.5 text-[10px] ml-auto shrink-0"
+                    aria-label="Reply"
+                    @click.stop="emit('select-agent', name)"
                   >
-                    <AlertTriangle class="size-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <div class="flex-1 min-w-0">
-                      <p class="text-[11px] font-semibold text-red-600 dark:text-red-400 leading-none mb-0.5">
-                        {{ agent.blockers.length }} blocker{{ agent.blockers.length !== 1 ? 's' : '' }}
-                      </p>
-                      <p class="text-[11px] text-red-600/80 dark:text-red-400/80 font-text line-clamp-1">
-                        {{ agent.blockers[0] }}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="h-6 px-2 text-[10px] border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 shrink-0"
-                      aria-label="Reply to blocker"
-                      @click.stop="emit('select-agent', name)"
-                    >
-                      <MessageSquareReply class="size-3" />
-                      Reply
-                    </Button>
-                  </div>
-                  <!-- Question banner -->
-                  <div
-                    v-if="agent.questions?.length"
-                    class="flex items-start gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2"
-                  >
-                    <HelpCircle class="size-3.5 text-amber-500 shrink-0 mt-0.5" />
-                    <div class="flex-1 min-w-0">
-                      <p class="text-[11px] font-semibold text-amber-600 dark:text-amber-400 leading-none mb-0.5">
-                        {{ agent.questions.length }} question{{ agent.questions.length !== 1 ? 's' : '' }}
-                      </p>
-                      <p class="text-[11px] text-amber-600/80 dark:text-amber-400/80 font-text line-clamp-1">
-                        {{ agent.questions[0] }}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="h-6 px-2 text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 shrink-0"
-                      aria-label="Reply to question"
-                      @click.stop="emit('select-agent', name)"
-                    >
-                      <MessageSquareReply class="size-3" />
-                      Reply
-                    </Button>
-                  </div>
+                    <MessageSquareReply class="size-3" />
+                    Reply
+                  </Button>
                 </div>
 
                 <!-- Row 5: Footer — Actions -->
