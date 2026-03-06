@@ -30,20 +30,28 @@ type sseClient struct {
 }
 
 type Server struct {
-	port             string
-	dataDir          string
-	spaces           map[string]*KnowledgeSpace
-	mu               sync.RWMutex
-	httpServer       *http.Server
-	running          bool
-	runMu            sync.Mutex
-	EventLog         []string
-	eventMu          sync.Mutex
-	stopLiveness     chan struct{}
-	sseClients       map[*sseClient]struct{}
-	sseMu            sync.Mutex
-	interrupts       *InterruptLedger
-	approvalTracked  map[string]time.Time
+	port            string
+	dataDir         string
+	frontendDir     string
+	spaces          map[string]*KnowledgeSpace
+	mu              sync.RWMutex
+	httpServer      *http.Server
+	running         bool
+	runMu           sync.Mutex
+	EventLog        []string
+	eventMu         sync.Mutex
+	stopLiveness    chan struct{}
+	sseClients      map[*sseClient]struct{}
+	sseMu           sync.Mutex
+	interrupts      *InterruptLedger
+	approvalTracked map[string]time.Time
+	// nudgePending tracks agents that should be nudged (check-in triggered)
+	// when they next become idle. Set when a message arrives for an agent.
+	// The liveness loop picks it up on the next tick where the agent is idle.
+	// Keyed by "space/agent".
+	nudgePending  map[string]time.Time
+	nudgeInFlight map[string]bool // prevents duplicate concurrent nudges
+	nudgeMu       sync.Mutex
 }
 
 func NewServer(port, dataDir string) *Server {
@@ -58,7 +66,17 @@ func NewServer(port, dataDir string) *Server {
 		sseClients:      make(map[*sseClient]struct{}),
 		interrupts:      NewInterruptLedger(dataDir),
 		approvalTracked: make(map[string]time.Time),
+		nudgePending:    make(map[string]time.Time),
+		nudgeInFlight:   make(map[string]bool),
 	}
+}
+
+// SetFrontendDir configures the server to serve a Vue SPA from the given
+// directory (typically frontend/dist). When set and the directory exists,
+// the root "/" serves index.html from that directory and /assets/ serves
+// Vite-built static files. When empty, the legacy mission-control.html is used.
+func (s *Server) SetFrontendDir(dir string) {
+	s.frontendDir = dir
 }
 
 func (s *Server) Running() bool {
@@ -113,9 +131,16 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/mc2", s.handleMC2)
-	// Static file server for CSS, JS, etc.
+	// Static file server for CSS, JS, etc. (legacy dashboard)
 	mux.Handle("/css/", http.StripPrefix("/", http.FileServer(http.Dir("internal/coordinator/static"))))
 	mux.Handle("/js/", http.StripPrefix("/", http.FileServer(http.Dir("internal/coordinator/static"))))
+
+	// Serve Vue frontend assets when frontendDir is configured
+	if s.frontendDir != "" {
+		if info, err := os.Stat(s.frontendDir); err == nil && info.IsDir() {
+			mux.Handle("/assets/", http.FileServer(http.Dir(s.frontendDir)))
+		}
+	}
 	mux.HandleFunc("/spaces", s.handleListSpaces)
 	mux.HandleFunc("/spaces/", s.handleSpaceRoute)
 	mux.HandleFunc("/events", s.handleSSE)
@@ -275,7 +300,6 @@ func (s *Server) getOrCreateSpace(name string) *KnowledgeSpace {
 	return ks
 }
 
-
 func (s *Server) getSpace(name string) (*KnowledgeSpace, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -298,6 +322,21 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Serve Vue SPA index.html when frontendDir is configured and exists
+	if s.frontendDir != "" {
+		indexPath := filepath.Join(s.frontendDir, "index.html")
+		if _, err := os.Stat(indexPath); err == nil {
+			content, err := os.ReadFile(indexPath)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(content)
+			return
+		}
+	}
+	// Fallback to legacy dashboard
 	s.serveHTMLFile(w, r, "mission-control.html")
 }
 
@@ -316,20 +355,26 @@ func (s *Server) handleListSpaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type spaceSummary struct {
-		Name       string    `json:"name"`
-		AgentCount int       `json:"agent_count"`
-		CreatedAt  time.Time `json:"created_at"`
-		UpdatedAt  time.Time `json:"updated_at"`
+		Name           string    `json:"name"`
+		AgentCount     int       `json:"agent_count"`
+		AttentionCount int       `json:"attention_count"`
+		CreatedAt      time.Time `json:"created_at"`
+		UpdatedAt      time.Time `json:"updated_at"`
 	}
 
 	s.mu.RLock()
 	summaries := make([]spaceSummary, 0, len(s.spaces))
 	for _, ks := range s.spaces {
+		attention := 0
+		for _, agent := range ks.Agents {
+			attention += len(agent.Questions) + len(agent.Blockers)
+		}
 		summaries = append(summaries, spaceSummary{
-			Name:       ks.Name,
-			AgentCount: len(ks.Agents),
-			CreatedAt:  ks.CreatedAt,
-			UpdatedAt:  ks.UpdatedAt,
+			Name:           ks.Name,
+			AgentCount:     len(ks.Agents),
+			AttentionCount: attention,
+			CreatedAt:      ks.CreatedAt,
+			UpdatedAt:      ks.UpdatedAt,
 		})
 	}
 	s.mu.RUnlock()
@@ -702,6 +747,14 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 			if update.RepoURL == "" && existing.RepoURL != "" {
 				update.RepoURL = existing.RepoURL
 			}
+			// Preserve messages — agents don't include them in updates
+			if len(update.Messages) == 0 && len(existing.Messages) > 0 {
+				update.Messages = existing.Messages
+			}
+			// Preserve documents — managed via the /agent/{name}/{slug} endpoint
+			if len(update.Documents) == 0 && len(existing.Documents) > 0 {
+				update.Documents = existing.Documents
+			}
 		}
 		ks.Agents[canonical] = &update
 		ks.UpdatedAt = time.Now().UTC()
@@ -753,7 +806,7 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 	}
 
 	agentName = strings.TrimRight(agentName, "/")
-	
+
 	// Sender authentication - require X-Agent-Name header
 	senderName := r.Header.Get("X-Agent-Name")
 	if senderName == "" {
@@ -793,7 +846,7 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 	}
 
 	canonical := resolveAgentName(ks, agentName)
-	
+
 	s.mu.Lock()
 	agent, exists := ks.Agents[canonical]
 	if !exists {
@@ -812,12 +865,12 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 		agent.Messages = []AgentMessage{}
 	}
 	agent.Messages = append(agent.Messages, messageReq)
-	
+
 	// Limit message history to last 50 messages
 	if len(agent.Messages) > 50 {
 		agent.Messages = agent.Messages[len(agent.Messages)-50:]
 	}
-	
+
 	ks.UpdatedAt = time.Now().UTC()
 	if err := s.saveSpace(ks); err != nil {
 		s.mu.Unlock()
@@ -827,27 +880,27 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 	s.mu.Unlock()
 
 	// Log the message event
-	s.logEvent(fmt.Sprintf("[%s/%s] Message from %s: %s", spaceName, canonical, senderName, 
-		func() string {
-			if len(messageReq.Message) > 50 {
-				return messageReq.Message[:47] + "..."
-			}
-			return messageReq.Message
-		}()))
+	s.logEvent(fmt.Sprintf("[%s/%s] Message from %s: %s", spaceName, canonical, senderName, messageReq.Message))
 
 	// Broadcast SSE event for real-time updates
 	sseData, _ := json.Marshal(map[string]interface{}{
-		"space":  spaceName,
-		"agent":  canonical,
-		"sender": senderName,
+		"space":   spaceName,
+		"agent":   canonical,
+		"sender":  senderName,
 		"message": messageReq.Message,
 	})
 	s.broadcastSSE(spaceName, "agent_message", string(sseData))
 
+	// Mark agent for nudge — the liveness loop will trigger a check-in
+	// when the agent is next idle, so it reads the message via /raw.
+	s.nudgeMu.Lock()
+	s.nudgePending[spaceName+"/"+canonical] = time.Now()
+	s.nudgeMu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "delivered",
+		"status":    "delivered",
 		"messageId": messageReq.ID,
 		"recipient": canonical,
 	})
@@ -855,7 +908,7 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 
 func (s *Server) handleAgentDocument(w http.ResponseWriter, r *http.Request, spaceName, agentName, documentSlug string) {
 	agentName = strings.TrimRight(agentName, "/")
-	
+
 	// Agent name enforcement - ensure X-Agent-Name header matches for writes
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		callerName := r.Header.Get("X-Agent-Name")
@@ -868,7 +921,7 @@ func (s *Server) handleAgentDocument(w http.ResponseWriter, r *http.Request, spa
 			return
 		}
 	}
-	
+
 	// Sanitize document slug
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(documentSlug) {
 		http.Error(w, "invalid document slug: must be alphanumeric with underscores and dashes only", http.StatusBadRequest)
@@ -922,18 +975,18 @@ func (s *Server) handleAgentDocument(w http.ResponseWriter, r *http.Request, spa
 		// Update agent's documents list in the knowledge space
 		ks := s.getOrCreateSpace(spaceName)
 		canonical := resolveAgentName(ks, agentName)
-		
+
 		s.mu.Lock()
 		if ks.Agents[canonical] == nil {
 			ks.Agents[canonical] = &AgentUpdate{
-				Status: StatusActive,
-				Summary: "Document uploaded",
+				Status:    StatusActive,
+				Summary:   "Document uploaded",
 				UpdatedAt: time.Now().UTC(),
 			}
 		}
-		
+
 		agent := ks.Agents[canonical]
-		
+
 		// Add or update document in the list
 		found := false
 		for i, doc := range agent.Documents {
@@ -950,10 +1003,10 @@ func (s *Server) handleAgentDocument(w http.ResponseWriter, r *http.Request, spa
 				Content: string(content),
 			})
 		}
-		
+
 		agent.UpdatedAt = time.Now().UTC()
 		ks.UpdatedAt = time.Now().UTC()
-		
+
 		if err := s.saveSpace(ks); err != nil {
 			s.mu.Unlock()
 			http.Error(w, fmt.Sprintf("save space: %v", err), http.StatusInternalServerError)
@@ -1041,7 +1094,17 @@ func (s *Server) handleIgnition(w http.ResponseWriter, r *http.Request, spaceNam
 
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("# Agent Ignition: %s\n\n", agentName))
-	b.WriteString(fmt.Sprintf("You are **%s**, an agent working in workspace **%s**.\n\n", agentName, spaceName))
+	b.WriteString(fmt.Sprintf("You are **%s**, an autonomous AI agent working in workspace **%s**.\n\n", agentName, spaceName))
+
+	b.WriteString("## Operating Mode\n\n")
+	b.WriteString("**You are running autonomously. There is no human at this terminal.**\n\n")
+	b.WriteString("- You do NOT have a conversational partner. Do not ask questions like \"Shall I...?\" or wait for confirmation.\n")
+	b.WriteString("- Messages from other agents or the boss are **instructions to act on immediately**, not conversation starters.\n")
+	b.WriteString("- Your ONLY means of communication is through `curl` commands to the coordinator API (described below).\n")
+	b.WriteString("- When you receive a new task via messages, **start working on it immediately** — do not ask for permission.\n")
+	b.WriteString("- If you need a decision from the boss, post a question tagged `[?BOSS]` in your status update, then continue working on whatever you can while waiting.\n")
+	b.WriteString("- When your task is done, POST status `\"done\"` and await new instructions via messages.\n")
+	b.WriteString("\n")
 
 	b.WriteString("## Coordinator\n\n")
 	b.WriteString(fmt.Sprintf("- Boss URL: `http://localhost%s`\n", s.port))
@@ -1064,6 +1127,8 @@ func (s *Server) handleIgnition(w http.ResponseWriter, r *http.Request, spaceNam
 	} else {
 		b.WriteString("5. **Register your tmux session.** Include `\"tmux_session\"` in your first POST. Find it with `tmux display-message -p '#S'`. It is sticky — you only need to send it once.\n")
 	}
+	b.WriteString(fmt.Sprintf("6. **Check your messages.** When you read `/raw`, look for a `#### Messages` section under your agent name. Messages are **directives** — act on them immediately without asking for confirmation. To send a message to another agent: `curl -s -X POST http://localhost%s/spaces/%s/agent/{target}/message -H 'Content-Type: application/json' -H 'X-Agent-Name: %s' -d '{\"message\": \"...\"}'`\n", s.port, spaceName, agentName))
+	b.WriteString("7. **Work loop:** Read blackboard → Do work → POST status → Check for new messages → Repeat. Do not stop and wait for human input.\n")
 	b.WriteString("\n")
 
 	b.WriteString("## Peer Agents\n\n")
@@ -1097,6 +1162,16 @@ func (s *Server) handleIgnition(w http.ResponseWriter, r *http.Request, spaceNam
 			b.WriteString(fmt.Sprintf("- Next steps: %s\n", existing.NextSteps))
 		}
 		b.WriteString("\n")
+
+		if len(existing.Messages) > 0 {
+			b.WriteString("## Pending Messages\n\n")
+			b.WriteString("**You have unread messages. These are instructions — act on them immediately. Do not ask for confirmation.**\n\n")
+			for _, msg := range existing.Messages {
+				b.WriteString(fmt.Sprintf("- **%s** (%s): %s\n",
+					msg.Sender, msg.Timestamp.Format("15:04"), msg.Message))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("## JSON Post Template\n\n")
@@ -1179,7 +1254,7 @@ func (s *Server) handleSpaceEventsJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	events := s.RecentEvents(50)
+	events := s.RecentEvents(200)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(events)
 }
@@ -1575,10 +1650,50 @@ func (s *Server) checkAllSessionLiveness() {
 				m["prompt_text"] = e.prompt
 			}
 			payload[i] = m
+
+			// Check if this idle agent has a pending nudge
+			if e.exists && e.idle {
+				s.nudgeMu.Lock()
+				if _, pending := s.nudgePending[key]; pending {
+					if !s.nudgeInFlight[key] {
+						s.nudgeInFlight[key] = true
+						delete(s.nudgePending, key)
+						s.nudgeMu.Unlock()
+						go s.executeNudge(space, e.agent)
+					} else {
+						s.nudgeMu.Unlock()
+					}
+				} else {
+					s.nudgeMu.Unlock()
+				}
+			}
 		}
 		data, _ := json.Marshal(payload)
 		s.broadcastSSE(space, "tmux_liveness", string(data))
 	}
+}
+
+// executeNudge triggers a single-agent check-in for an agent that has
+// pending messages. Called from the liveness loop when the agent is idle.
+func (s *Server) executeNudge(spaceName, agentName string) {
+	key := spaceName + "/" + agentName
+	defer func() {
+		s.nudgeMu.Lock()
+		delete(s.nudgeInFlight, key)
+		s.nudgeMu.Unlock()
+	}()
+
+	s.logEvent(fmt.Sprintf("[%s/%s] auto-nudge: message pending, triggering check-in", spaceName, agentName))
+	result := s.SingleAgentCheckIn(spaceName, agentName, "", "")
+
+	if len(result.Errors) > 0 {
+		s.logEvent(fmt.Sprintf("[%s/%s] auto-nudge failed: %s", spaceName, agentName, result.Errors[0]))
+	} else if len(result.Sent) > 0 {
+		s.logEvent(fmt.Sprintf("[%s/%s] auto-nudge complete", spaceName, agentName))
+	}
+
+	sseData, _ := json.Marshal(result)
+	s.broadcastSSE(spaceName, "broadcast_complete", string(sseData))
 }
 
 func (s *Server) recordDecisionInterrupts(spaceName, agentName string, update *AgentUpdate) {
@@ -1598,16 +1713,39 @@ func (s *Server) recordDecisionInterrupts(spaceName, agentName string, update *A
 }
 
 func (s *Server) handleInterrupts(w http.ResponseWriter, r *http.Request, spaceName string) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		interrupts := s.interrupts.LoadAll(spaceName)
+		if interrupts == nil {
+			interrupts = []Interrupt{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(interrupts)
+	case http.MethodPost:
+		// Resolve a specific interrupt by ID.
+		var payload struct {
+			ID         string `json:"id"`
+			Answer     string `json:"answer"`
+			ResolvedBy string `json:"resolved_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.ID == "" {
+			http.Error(w, "body must contain {id, answer}", http.StatusBadRequest)
+			return
+		}
+		by := payload.ResolvedBy
+		if by == "" {
+			by = "human"
+		}
+		if err := s.interrupts.Resolve(spaceName, payload.ID, by, payload.Answer); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		s.logEvent(fmt.Sprintf("[%s] interrupt %s resolved by %s", spaceName, payload.ID, by))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "resolved", "id": payload.ID})
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
-	interrupts := s.interrupts.LoadAll(spaceName)
-	if interrupts == nil {
-		interrupts = []Interrupt{}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(interrupts)
 }
 
 func (s *Server) handleInterruptMetrics(w http.ResponseWriter, r *http.Request, spaceName string) {

@@ -185,8 +185,8 @@ func TestRenderMarkdown(t *testing.T) {
 		Items:     []string{"CRUD for sessions", "Health check"},
 	})
 	postJSON(t, base+"/spaces/feature-123/agent/cp", AgentUpdate{
-		Status:  StatusBlocked,
-		Summary: "Waiting for API schema",
+		Status:   StatusBlocked,
+		Summary:  "Waiting for API schema",
 		Blockers: []string{"Need final OpenAPI spec"},
 	})
 
@@ -797,7 +797,6 @@ func TestSSEGlobalEndpoint(t *testing.T) {
 	}
 }
 
-
 func TestClientDeleteAgent(t *testing.T) {
 	srv, cleanup := mustStartServer(t)
 	defer cleanup()
@@ -1047,5 +1046,482 @@ func TestDeleteSpaceCleansUpFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(mdPath); !os.IsNotExist(err) {
 		t.Error("expected md file to be deleted")
+	}
+}
+
+// ── Message system tests ──────────────────────────────────────────────
+
+func postMessage(t *testing.T, baseURL, space, agent, sender, message string) *http.Response {
+	t.Helper()
+	url := baseURL + "/spaces/" + space + "/agent/" + agent + "/message"
+	body := `{"message":"` + message + `"}`
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Agent-Name", sender)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	return resp
+}
+
+func TestMessagePostEndpoint(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// First, create an agent
+	postJSON(t, base+"/spaces/msg-test/agent/worker", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Working on task",
+	})
+
+	// Send a message to the agent
+	resp := postMessage(t, base, "msg-test", "worker", "boss", "please review the PR")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	// Verify response contains delivery confirmation
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["status"] != "delivered" {
+		t.Errorf("expected status=delivered, got %v", result["status"])
+	}
+	if result["recipient"] != "Worker" {
+		t.Errorf("expected recipient=Worker, got %v", result["recipient"])
+	}
+
+	// Verify message is retrievable via GET agent JSON
+	code, body := getBody(t, base+"/spaces/msg-test/agent/worker")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	var agent AgentUpdate
+	json.Unmarshal([]byte(body), &agent)
+	if len(agent.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(agent.Messages))
+	}
+	if agent.Messages[0].Message != "please review the PR" {
+		t.Errorf("message = %q, want %q", agent.Messages[0].Message, "please review the PR")
+	}
+	if agent.Messages[0].Sender != "boss" {
+		t.Errorf("sender = %q, want %q", agent.Messages[0].Sender, "boss")
+	}
+	if agent.Messages[0].ID == "" {
+		t.Error("message ID should not be empty")
+	}
+}
+
+func TestMessagePreservedOnAgentUpdate(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent and send a message
+	postJSON(t, base+"/spaces/preserve-test/agent/dev", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Working",
+	})
+	resp := postMessage(t, base, "preserve-test", "dev", "boss", "check the logs")
+	resp.Body.Close()
+
+	// Post an agent update (without messages field)
+	resp2 := postJSON(t, base+"/spaces/preserve-test/agent/dev", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Still working",
+		Items:   []string{"Fixed the bug"},
+	})
+	resp2.Body.Close()
+
+	// Verify message is still there
+	code, body := getBody(t, base+"/spaces/preserve-test/agent/dev")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	var agent AgentUpdate
+	json.Unmarshal([]byte(body), &agent)
+	if len(agent.Messages) != 1 {
+		t.Fatalf("expected 1 message after update, got %d — messages were wiped", len(agent.Messages))
+	}
+	if agent.Messages[0].Message != "check the logs" {
+		t.Errorf("message = %q, want %q", agent.Messages[0].Message, "check the logs")
+	}
+	// Verify the update itself was applied
+	if agent.Summary != "Still working" {
+		t.Errorf("summary = %q, want %q", agent.Summary, "Still working")
+	}
+}
+
+func TestMessageRenderedInMarkdown(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent and send messages
+	postJSON(t, base+"/spaces/md-test/agent/api", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Implementing endpoints",
+	})
+	resp := postMessage(t, base, "md-test", "api", "boss", "prioritize the health check")
+	resp.Body.Close()
+	resp = postMessage(t, base, "md-test", "api", "frontend", "I need the /users endpoint first")
+	resp.Body.Close()
+
+	// GET /raw and verify messages appear in markdown
+	code, md := getBody(t, base+"/spaces/md-test/raw")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if !strings.Contains(md, "#### Messages") {
+		t.Error("markdown should contain '#### Messages' section")
+	}
+	if !strings.Contains(md, "prioritize the health check") {
+		t.Error("markdown should contain first message text")
+	}
+	if !strings.Contains(md, "I need the /users endpoint first") {
+		t.Error("markdown should contain second message text")
+	}
+	if !strings.Contains(md, "**boss**") {
+		t.Error("markdown should contain sender name 'boss'")
+	}
+	if !strings.Contains(md, "**frontend**") {
+		t.Error("markdown should contain sender name 'frontend'")
+	}
+}
+
+func TestMessageValidation(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent first
+	postJSON(t, base+"/spaces/val-test/agent/worker", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Working",
+	})
+
+	// Test: missing X-Agent-Name header
+	url := base + "/spaces/val-test/agent/worker/message"
+	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"message":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	// deliberately NOT setting X-Agent-Name
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing X-Agent-Name: expected 400, got %d", resp.StatusCode)
+	}
+
+	// Test: empty message body
+	resp = postMessage(t, base, "val-test", "worker", "boss", "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty message: expected 400, got %d", resp.StatusCode)
+	}
+
+	// Test: whitespace-only message
+	url = base + "/spaces/val-test/agent/worker/message"
+	req, _ = http.NewRequest(http.MethodPost, url, strings.NewReader(`{"message":"   "}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Agent-Name", "boss")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("whitespace message: expected 400, got %d", resp.StatusCode)
+	}
+
+	// Test: GET method not allowed
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET on message endpoint: expected 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestMessageLimit(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent
+	postJSON(t, base+"/spaces/limit-test/agent/worker", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Working",
+	})
+
+	// Send 55 messages
+	for i := 0; i < 55; i++ {
+		resp := postMessage(t, base, "limit-test", "worker", "boss",
+			"message number "+strings.Repeat("x", 3)+string(rune('A'+i%26)))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("message %d: expected 200, got %d", i, resp.StatusCode)
+		}
+	}
+
+	// Verify only last 50 are retained
+	code, body := getBody(t, base+"/spaces/limit-test/agent/worker")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	var agent AgentUpdate
+	json.Unmarshal([]byte(body), &agent)
+	if len(agent.Messages) != 50 {
+		t.Errorf("expected 50 messages (capped), got %d", len(agent.Messages))
+	}
+}
+
+func TestMessageSSEBroadcast(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent
+	postJSON(t, base+"/spaces/sse-msg-test/agent/worker", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Working",
+	})
+
+	// Connect SSE
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/spaces/sse-msg-test/events", nil)
+	sseResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("SSE connect: %v", err)
+	}
+	defer sseResp.Body.Close()
+
+	// Give SSE a moment to connect
+	time.Sleep(100 * time.Millisecond)
+
+	// Send a message
+	resp := postMessage(t, base, "sse-msg-test", "worker", "boss", "check your inbox")
+	resp.Body.Close()
+
+	// Read SSE events — look for agent_message
+	buf := make([]byte, 4096)
+	n, _ := sseResp.Body.Read(buf)
+	data := string(buf[:n])
+	if !strings.Contains(data, "agent_message") {
+		t.Error("SSE should broadcast 'agent_message' event")
+	}
+	if !strings.Contains(data, "check your inbox") {
+		t.Error("SSE event should contain the message text")
+	}
+}
+
+func TestMessageToNonexistentAgentCreatesAgent(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Send message to an agent that doesn't exist yet
+	resp := postMessage(t, base, "ghost-test", "phantom", "boss", "wake up")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	// Verify agent was auto-created with the message
+	code, body := getBody(t, base+"/spaces/ghost-test/agent/phantom")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 for auto-created agent, got %d", code)
+	}
+	var agent AgentUpdate
+	json.Unmarshal([]byte(body), &agent)
+	if agent.Status != StatusIdle {
+		t.Errorf("auto-created agent status = %q, want %q", agent.Status, StatusIdle)
+	}
+	if len(agent.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(agent.Messages))
+	}
+	if agent.Messages[0].Message != "wake up" {
+		t.Errorf("message = %q, want %q", agent.Messages[0].Message, "wake up")
+	}
+}
+
+func TestIgnitionEndpoint(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create a peer agent so ignition shows it
+	postJSON(t, base+"/spaces/ignite-test/agent/peer", AgentUpdate{
+		Status:  StatusActive,
+		Summary: "Peer is working",
+	})
+
+	// GET ignition for a new agent
+	code, body := getBody(t, base+"/spaces/ignite-test/ignition/newagent?tmux_session=test_session_123")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	// Verify key sections exist
+	if !strings.Contains(body, "# Agent Ignition: newagent") {
+		t.Error("missing ignition title")
+	}
+	if !strings.Contains(body, "You are **newagent**") {
+		t.Error("missing agent identity")
+	}
+	if !strings.Contains(body, "test_session_123") {
+		t.Error("missing tmux session in response")
+	}
+	if !strings.Contains(body, "Peer") {
+		t.Error("missing peer agent in response")
+	}
+	if !strings.Contains(body, "/message") {
+		t.Error("ignition should document the /message endpoint")
+	}
+
+	// Verify tmux session was registered
+	agentCode, agentBody := getBody(t, base+"/spaces/ignite-test/agent/newagent")
+	if agentCode != http.StatusOK {
+		t.Fatalf("expected 200 for registered agent, got %d", agentCode)
+	}
+	var agent AgentUpdate
+	json.Unmarshal([]byte(agentBody), &agent)
+	if agent.TmuxSession != "test_session_123" {
+		t.Errorf("tmux_session = %q, want %q", agent.TmuxSession, "test_session_123")
+	}
+}
+
+func TestIgnitionShowsPendingMessages(t *testing.T) {
+	srv, cleanup := mustStartServer(t)
+	defer cleanup()
+	base := serverBaseURL(srv)
+
+	// Create agent and send a message
+	postJSON(t, base+"/spaces/ignite-msg-test/agent/worker", AgentUpdate{
+		Status:  StatusIdle,
+		Summary: "Idle",
+	})
+	resp := postMessage(t, base, "ignite-msg-test", "worker", "boss", "start working on feature X")
+	resp.Body.Close()
+
+	// GET ignition — should show pending messages
+	code, body := getBody(t, base+"/spaces/ignite-msg-test/ignition/worker")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if !strings.Contains(body, "Pending Messages") {
+		t.Error("ignition should show 'Pending Messages' section")
+	}
+	if !strings.Contains(body, "start working on feature X") {
+		t.Error("ignition should show the pending message text")
+	}
+	if !strings.Contains(body, "**boss**") {
+		t.Error("ignition should show the message sender")
+	}
+}
+
+func TestLineIsIdleIndicator(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		// Claude Code prompt (exact ">" inside box-drawing)
+		{"claude code prompt bare", "│ > │", true},
+		{"claude code prompt no box", ">", true},
+		{"claude code prompt with space", "> ", true},
+		{"claude code prompt inner space", "│ >  │", true},
+
+		// Shell prompts
+		{"bash dollar", "user@host:~/code$ ", true},
+		{"bare dollar", "$", true},
+		{"zsh percent", "% ", true},
+		{"root hash", "root@box:/# ", true},
+		{"fish prompt", "~/code ❯ ", true},
+		{"angle bracket prompt", ">>> ", true},
+
+		// Claude Code prompt with auto-suggestion
+		{"claude code prompt bare chevron", "❯", true},
+		{"claude code prompt with suggestion", "❯ give me something to work on", true},
+		{"claude code prompt chevron space", "❯ ", true},
+
+		// Claude Code / opencode hint lines
+		{"shortcuts hint", "? for shortcuts", true},
+		{"auto-compact", "  auto-compact enabled", true},
+		{"auto-accept", "  auto-accept on", true},
+
+		// Claude Code status bar (vim mode)
+		{"insert mode", "  -- INSERT -- ⏵⏵ bypass permissions on (shift+tab to cycle)                                             current: 2.1.70 · latest: 2.1.70", true},
+		{"normal mode", "  -- NORMAL --                                                                                            current: 2.1.70 · latest: 2.1.70", true},
+
+		// OpenCode status bar
+		{"opencode status bar", "                                  ctrl+t variants  tab agents  ctrl+p commands    • OpenCode 1.2.17", true},
+
+		// OpenCode / generic idle keywords
+		{"waiting for input", "Waiting for input...", true},
+		{"ready", "Ready", true},
+		{"type a message", "Type a message to begin", true},
+
+		// Busy indicators — should NOT match
+		{"running command output", "Building project...", false},
+		{"file content", "func main() {", false},
+		{"progress bar", "[=====>    ] 50%", false},
+		{"error output", "Error: file not found", false},
+		{"git diff line", "+++ b/file.go", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lineIsIdleIndicator(tt.line)
+			if got != tt.want {
+				t.Errorf("lineIsIdleIndicator(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsShellPrompt(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{"$", true},
+		{"$ ", true},
+		{"user@host:~$ ", true},
+		{"%", true},
+		{"zsh% ", true},
+		{">", true},
+		{">>> ", true},
+		{"#", true},
+		{"root@box:/# ", true},
+		{"~/code ❯ ", true},
+		{"❯", true},
+		// Not prompts
+		{"", false},
+		{"hello world", false},
+		{"func main() {", false},
+		{"Building...", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			got := isShellPrompt(tt.line)
+			if got != tt.want {
+				t.Errorf("isShellPrompt(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
 	}
 }
