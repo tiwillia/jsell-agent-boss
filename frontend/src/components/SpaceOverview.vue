@@ -246,7 +246,7 @@ const activeSections = computed(() => [
 
 <template>
   <ScrollArea class="h-full">
-    <div class="p-6 space-y-6 max-w-6xl">
+    <div class="p-6 space-y-6 max-w-7xl">
       <!-- Header -->
       <div class="flex items-center justify-between">
         <div>
@@ -320,7 +320,7 @@ const activeSections = computed(() => [
                 </div>
                 <!-- Cards grid -->
                 <div
-                  class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+                  class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                   role="list"
                   :aria-label="section.ariaLabel"
                 >
