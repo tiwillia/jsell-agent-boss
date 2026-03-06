@@ -88,11 +88,11 @@ function sseEventToBadge(sseType: string): string {
 
 const badgeStyles: Record<string, string> = {
   agent: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-  approval: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20',
+  approval: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20',
   interrupt: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20',
   broadcast: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20',
   error: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20',
-  removed: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20',
+  removed: 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/20',
   system: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20',
   message: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20',
   document: 'bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20',
@@ -203,26 +203,34 @@ function handleScroll() {
 }
 
 // ── Resize handling ──────────────────────────────────────────────
-function startResize(e: MouseEvent) {
+function startResize(e: MouseEvent | TouchEvent) {
   e.preventDefault()
   isResizing.value = true
-  const startY = e.clientY
+  const startY = 'touches' in e ? e.touches[0]!.clientY : e.clientY
   const startHeight = panelHeight.value
 
-  function onMouseMove(moveEvent: MouseEvent) {
+  function getY(ev: MouseEvent | TouchEvent): number {
+    return 'touches' in ev ? ev.touches[0]!.clientY : (ev as MouseEvent).clientY
+  }
+
+  function onMove(moveEvent: MouseEvent | TouchEvent) {
     // Dragging up increases height (mouse goes up = smaller Y = positive delta)
-    const delta = startY - moveEvent.clientY
+    const delta = startY - getY(moveEvent)
     panelHeight.value = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight + delta))
   }
 
-  function onMouseUp() {
+  function onEnd() {
     isResizing.value = false
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onEnd)
+    document.removeEventListener('touchmove', onMove as EventListener)
+    document.removeEventListener('touchend', onEnd)
   }
 
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onEnd)
+  document.addEventListener('touchmove', onMove as EventListener, { passive: false })
+  document.addEventListener('touchend', onEnd)
 }
 
 // Reload events when space changes
@@ -252,6 +260,7 @@ defineExpose({ pushSSEEvent, clearLog })
       v-if="isOpen"
       class="h-3 cursor-ns-resize group shrink-0 flex items-center justify-center relative"
       @mousedown.prevent="startResize"
+      @touchstart.prevent="startResize"
     >
       <!-- Invisible wider hit area -->
       <div class="absolute inset-x-0 -top-1 -bottom-1" />
@@ -259,11 +268,13 @@ defineExpose({ pushSSEEvent, clearLog })
     </div>
 
     <!-- Toggle bar -->
-    <button
-      class="w-full flex items-center justify-between px-4 py-1.5 text-xs hover:bg-accent/50 transition-colors cursor-pointer select-none shrink-0"
-      @click="toggleOpen"
-    >
-      <div class="flex items-center gap-2">
+    <div class="w-full flex items-center justify-between px-4 py-1.5 text-xs shrink-0">
+      <button
+        class="flex items-center gap-2 hover:bg-accent/50 transition-colors cursor-pointer select-none rounded px-1 -mx-1"
+        :aria-expanded="isOpen"
+        aria-label="Toggle event log panel"
+        @click="toggleOpen"
+      >
         <!-- Terminal/console icon -->
         <svg
           class="size-3.5 text-muted-foreground"
@@ -288,12 +299,12 @@ defineExpose({ pushSSEEvent, clearLog })
         >
           {{ entryCount }}
         </Badge>
-      </div>
+      </button>
       <div class="flex items-center gap-2">
         <button
           v-if="isOpen && !autoScroll"
           class="text-[10px] text-amber-500 font-medium hover:text-amber-400 cursor-pointer"
-          @click.stop="autoScroll = true; scrollToBottom()"
+          @click="autoScroll = true; scrollToBottom()"
         >
           Auto-scroll paused — click to resume
         </button>
@@ -302,7 +313,7 @@ defineExpose({ pushSSEEvent, clearLog })
           variant="ghost"
           size="sm"
           class="h-5 px-2 text-[10px] text-muted-foreground hover:text-foreground"
-          @click.stop="clearLog"
+          @click="clearLog"
         >
           <XCircle class="size-3.5" /> Clear
         </Button>
@@ -322,7 +333,7 @@ defineExpose({ pushSSEEvent, clearLog })
           <path d="m18 15-6-6-6 6" />
         </svg>
       </div>
-    </button>
+    </div>
 
     <!-- Log content -->
     <div
@@ -341,7 +352,12 @@ defineExpose({ pushSSEEvent, clearLog })
             v-for="entry in entries"
             :key="entry.id"
             class="border-b border-border/50 hover:bg-accent/30 transition-colors cursor-pointer"
+            tabindex="0"
+            role="row"
+            :aria-expanded="expandedId === entry.id"
             @click="expandedId = expandedId === entry.id ? null : entry.id"
+            @keydown.enter.prevent="expandedId = expandedId === entry.id ? null : entry.id"
+            @keydown.space.prevent="expandedId = expandedId === entry.id ? null : entry.id"
           >
             <td class="py-0.5 pl-4 pr-2 text-muted-foreground whitespace-nowrap align-top w-[70px]">
               {{ entry.timestamp }}

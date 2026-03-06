@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { RefreshCw, ShieldCheck, CornerDownLeft } from 'lucide-vue-next'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 
 const props = defineProps<{
   spaceName: string
@@ -25,6 +28,9 @@ const replyTexts = ref<Record<string, string>>({})
 const acting = ref<Record<string, boolean>>({})
 // Action feedback messages
 const actionFeedback = ref<Record<string, { ok: boolean; msg: string }>>({})
+// Approve confirmation dialog state
+const approveDialogOpen = ref(false)
+const approveDialogItem = ref<Interrupt | null>(null)
 
 async function fetchData() {
   loading.value = true
@@ -110,12 +116,30 @@ function typeColor(type: string): string {
   return typeColors[type] ?? 'bg-muted text-muted-foreground border-border'
 }
 
+function requestApprove(item: Interrupt) {
+  approveDialogItem.value = item
+  approveDialogOpen.value = true
+}
+
+async function confirmApprove() {
+  const item = approveDialogItem.value
+  approveDialogOpen.value = false
+  approveDialogItem.value = null
+  if (!item) return
+  await handleApprove(item)
+}
+
 async function handleApprove(item: Interrupt) {
   acting.value[item.id] = true
   actionFeedback.value[item.id] = { ok: true, msg: '' }
   try {
     await api.approveAgent(props.spaceName, item.agent)
     actionFeedback.value[item.id] = { ok: true, msg: 'Approved' }
+    setTimeout(() => {
+      if (actionFeedback.value[item.id]?.msg === 'Approved') {
+        delete actionFeedback.value[item.id]
+      }
+    }, 3000)
     // Refresh data after a short delay to let backend process
     setTimeout(() => fetchData(), 500)
   } catch (err) {
@@ -123,6 +147,9 @@ async function handleApprove(item: Interrupt) {
       ok: false,
       msg: err instanceof Error ? err.message : 'Approve failed',
     }
+    setTimeout(() => {
+      delete actionFeedback.value[item.id]
+    }, 3000)
   } finally {
     acting.value[item.id] = false
   }
@@ -137,12 +164,20 @@ async function handleReply(item: Interrupt) {
     await api.sendMessage(props.spaceName, item.agent, text, 'boss')
     replyTexts.value[item.id] = ''
     actionFeedback.value[item.id] = { ok: true, msg: 'Sent' }
+    setTimeout(() => {
+      if (actionFeedback.value[item.id]?.msg === 'Sent') {
+        delete actionFeedback.value[item.id]
+      }
+    }, 3000)
     setTimeout(() => fetchData(), 500)
   } catch (err) {
     actionFeedback.value[item.id] = {
       ok: false,
       msg: err instanceof Error ? err.message : 'Reply failed',
     }
+    setTimeout(() => {
+      delete actionFeedback.value[item.id]
+    }, 3000)
   } finally {
     acting.value[item.id] = false
   }
@@ -202,10 +237,11 @@ onMounted(fetchData)
     </div>
 
     <!-- Filter toggle -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2" role="group" aria-label="Filter interrupts">
       <Button
         :variant="!showAll ? 'default' : 'outline'"
         size="sm"
+        :aria-pressed="!showAll"
         @click="showAll = false"
       >
         Pending
@@ -213,6 +249,7 @@ onMounted(fetchData)
       <Button
         :variant="showAll ? 'default' : 'outline'"
         size="sm"
+        :aria-pressed="showAll"
         @click="showAll = true"
       >
         All
@@ -287,12 +324,12 @@ onMounted(fetchData)
 
             <!-- Actions for PENDING items -->
             <div v-if="!item.resolution" class="flex items-center gap-2 pt-1">
-              <!-- Approval type: one-click approve -->
+              <!-- Approval type: confirm then approve -->
               <template v-if="item.type === 'approval'">
                 <Button
                   size="sm"
                   :disabled="acting[item.id]"
-                  @click="handleApprove(item)"
+                  @click="requestApprove(item)"
                 >
                   <ShieldCheck class="size-4" /> Approve
                 </Button>
@@ -349,4 +386,24 @@ onMounted(fetchData)
       </div>
     </template>
   </div>
+
+  <!-- Approve confirmation dialog -->
+  <Dialog :open="approveDialogOpen" @update:open="approveDialogOpen = $event">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Confirm Approval</DialogTitle>
+        <DialogDescription>
+          This will send an approval signal to agent
+          <span class="font-mono font-semibold">{{ approveDialogItem?.agent }}</span>.
+          This action cannot be undone.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button variant="outline" @click="approveDialogOpen = false">Cancel</Button>
+        <Button @click="confirmApprove">
+          <ShieldCheck class="size-4" /> Confirm Approve
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
