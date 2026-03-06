@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -20,7 +21,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-import { Bell, Trash2, ShieldCheck, Terminal, X } from 'lucide-vue-next'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Bell, Trash2, ShieldCheck, Terminal, ChevronRight, X, HelpCircle, AlertTriangle, MessageSquareReply } from 'lucide-vue-next'
 import StatusBadge from './StatusBadge.vue'
 import AgentMessages from './AgentMessages.vue'
 
@@ -39,13 +41,38 @@ const emit = defineEmits<{
   'dismiss-question': [index: number]
   'dismiss-blocker': [index: number]
   'send-message': [text: string, sender: string]
+  'reply-to-question': [agentName: string, questionIndex: number, questionText: string, replyText: string]
+  'reply-to-blocker': [agentName: string, blockerIndex: number, blockerText: string, replyText: string]
 }>()
 
 const replyText = ref('')
+const tmuxInputOpen = ref(false)
 const dismissDialogOpen = ref(false)
 const dismissDialogIndex = ref<number | null>(null)
 const dismissDialogType = ref<'question' | 'blocker'>('question')
 const deleteDialogOpen = ref(false)
+
+// Per-question and per-blocker reply text
+const questionReplyTexts = ref<Record<number, string>>({})
+const blockerReplyTexts = ref<Record<number, string>>({})
+const questionReplying = ref<Record<number, boolean>>({})
+const blockerReplying = ref<Record<number, boolean>>({})
+
+function handleQuestionReply(index: number, questionText: string) {
+  const text = (questionReplyTexts.value[index] ?? '').trim()
+  if (!text) return
+  questionReplying.value[index] = true
+  emit('reply-to-question', props.agentName, index, questionText, text)
+  questionReplyTexts.value[index] = ''
+}
+
+function handleBlockerReply(index: number, blockerText: string) {
+  const text = (blockerReplyTexts.value[index] ?? '').trim()
+  if (!text) return
+  blockerReplying.value[index] = true
+  emit('reply-to-blocker', props.agentName, index, blockerText, text)
+  blockerReplyTexts.value[index] = ''
+}
 
 function relativeTime(dateStr: string): string {
   const now = Date.now()
@@ -257,82 +284,123 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
         </section>
       </div>
 
-      <!-- Questions & Blockers -->
-      <section v-if="hasQuestions || hasBlockers" class="space-y-3" aria-label="Questions and blockers">
-        <h2 class="text-sm font-medium text-muted-foreground">Questions & Blockers</h2>
+      <!-- Questions & Blockers — Actionable Inbox -->
+      <section v-if="hasQuestions || hasBlockers" class="space-y-4" aria-label="Questions and blockers">
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-foreground">Needs Your Attention</h2>
+          <Badge variant="destructive" class="h-5 min-w-5 px-1.5 text-[10px] font-semibold tabular-nums">
+            {{ (agent.questions?.length ?? 0) + (agent.blockers?.length ?? 0) }}
+          </Badge>
+        </div>
 
         <!-- Questions -->
-        <Card
+        <div
           v-for="(q, qi) in agent.questions"
           :key="'q-' + qi"
-          class="border-primary/30 bg-primary/5"
+          class="rounded-lg border-2 border-amber-500/50 bg-amber-500/5 p-4 space-y-3"
           role="article"
           :aria-label="`Question: ${q}`"
         >
-          <CardContent class="p-4 flex items-start justify-between gap-3">
-            <div class="flex items-start gap-2 min-w-0">
-              <span class="text-primary font-semibold text-sm shrink-0" aria-hidden="true">Q:</span>
-              <span class="font-text text-sm">{{ q }}</span>
+          <!-- Question header -->
+          <div class="flex items-start gap-3">
+            <div class="rounded-full bg-amber-500/15 p-1.5 shrink-0 mt-0.5">
+              <HelpCircle class="size-4 text-amber-500" />
             </div>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="shrink-0 text-muted-foreground hover:text-foreground h-7 px-2"
-                  :aria-label="`Dismiss question: ${q}`"
-                  @click="requestDismissQuestion(qi)"
-                >
-                  <X class="size-3.5" /> Dismiss
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Mark this question as resolved and remove it
-              </TooltipContent>
-            </Tooltip>
-          </CardContent>
-        </Card>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wide mb-1">Question</p>
+              <p class="font-text text-sm leading-relaxed">{{ q }}</p>
+            </div>
+          </div>
+
+          <!-- Inline reply form — visible by default -->
+          <div class="pl-10 space-y-2">
+            <Textarea
+              v-model="questionReplyTexts[qi]"
+              :placeholder="`Reply to this question...`"
+              class="min-h-[60px] text-sm font-text resize-y border-amber-500/30 focus-visible:ring-amber-500/50"
+              :disabled="questionReplying[qi]"
+            />
+            <div class="flex items-center gap-2">
+              <Button
+                size="sm"
+                class="bg-amber-600 hover:bg-amber-700 text-white"
+                :disabled="!(questionReplyTexts[qi] ?? '').trim() || questionReplying[qi]"
+                @click="handleQuestionReply(qi, q)"
+              >
+                <MessageSquareReply class="size-3.5" />
+                {{ questionReplying[qi] ? 'Sending...' : 'Reply' }}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="text-muted-foreground hover:text-foreground h-8 px-2 text-xs"
+                :disabled="questionReplying[qi]"
+                @click="requestDismissQuestion(qi)"
+              >
+                <X class="size-3" /> Dismiss without reply
+              </Button>
+            </div>
+          </div>
+        </div>
 
         <!-- Blockers -->
-        <Card
+        <div
           v-for="(b, bi) in agent.blockers"
           :key="'b-' + bi"
-          class="border-destructive/30 bg-destructive/5"
+          class="rounded-lg border-2 border-red-500/50 bg-red-500/5 p-4 space-y-3"
           role="article"
           :aria-label="`Blocker: ${b}`"
         >
-          <CardContent class="p-4 flex items-start justify-between gap-3">
-            <div class="flex items-start gap-2 min-w-0">
-              <span class="text-destructive font-semibold text-sm shrink-0" aria-hidden="true">Blocker:</span>
-              <span class="font-text text-sm">{{ b }}</span>
+          <!-- Blocker header -->
+          <div class="flex items-start gap-3">
+            <div class="rounded-full bg-red-500/15 p-1.5 shrink-0 mt-0.5">
+              <AlertTriangle class="size-4 text-red-500" />
             </div>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="shrink-0 text-muted-foreground hover:text-foreground h-7 px-2"
-                  :aria-label="`Dismiss blocker: ${b}`"
-                  @click="requestDismissBlocker(bi)"
-                >
-                  <X class="size-3.5" /> Dismiss
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Mark this blocker as resolved and remove it
-              </TooltipContent>
-            </Tooltip>
-          </CardContent>
-        </Card>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-medium text-red-600 dark:text-red-400 uppercase tracking-wide mb-1">Blocker</p>
+              <p class="font-text text-sm leading-relaxed">{{ b }}</p>
+            </div>
+          </div>
+
+          <!-- Inline reply form — visible by default -->
+          <div class="pl-10 space-y-2">
+            <Textarea
+              v-model="blockerReplyTexts[bi]"
+              :placeholder="`Respond to unblock (e.g. 'You're unblocked because...')...`"
+              class="min-h-[60px] text-sm font-text resize-y border-red-500/30 focus-visible:ring-red-500/50"
+              :disabled="blockerReplying[bi]"
+            />
+            <div class="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                :disabled="!(blockerReplyTexts[bi] ?? '').trim() || blockerReplying[bi]"
+                @click="handleBlockerReply(bi, b)"
+              >
+                <MessageSquareReply class="size-3.5" />
+                {{ blockerReplying[bi] ? 'Sending...' : 'Reply & Unblock' }}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="text-muted-foreground hover:text-foreground h-8 px-2 text-xs"
+                :disabled="blockerReplying[bi]"
+                @click="requestDismissBlocker(bi)"
+              >
+                <X class="size-3" /> Dismiss without reply
+              </Button>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <!-- Dismiss confirmation AlertDialog -->
+      <!-- Dismiss without reply confirmation AlertDialog -->
       <AlertDialog v-model:open="dismissDialogOpen">
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Dismiss {{ dismissDialogType }}?</AlertDialogTitle>
+            <AlertDialogTitle>Dismiss {{ dismissDialogType }} without replying?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to dismiss this {{ dismissDialogType }}? This action cannot be undone.
+              This will remove the {{ dismissDialogType }} without sending a reply to the agent. The agent won't receive an answer. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -432,37 +500,45 @@ const hasItems = computed(() => (props.agent.items?.length ?? 0) > 0)
           Tmux session not detected. Actions may not work if the agent's session uses a non-standard name.
         </p>
 
-        <!-- Reply input -->
-        <div class="space-y-1">
-          <label for="reply-input" class="text-xs text-muted-foreground font-text">
-            Send keystrokes to the agent's tmux session
-          </label>
-          <div class="flex gap-2">
-            <Input
-              id="reply-input"
-              v-model="replyText"
-              placeholder="Type text to send to tmux..."
-              class="flex-1 font-text"
-              @keydown="handleReplyKeydown"
-            />
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="!replyText.trim()"
-                  aria-label="Send reply to tmux session"
-                  @click="handleReply"
-                >
-                  <Terminal class="size-4" /> Reply
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Send this text as keystrokes to the agent's tmux session
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
+        <!-- Tmux keystroke injection (advanced) -->
+        <Collapsible v-model:open="tmuxInputOpen">
+          <CollapsibleTrigger class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-text">
+            <ChevronRight class="size-3 transition-transform" :class="{ 'rotate-90': tmuxInputOpen }" />
+            Tmux Keystroke Injection
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div class="space-y-1 mt-2">
+              <p class="text-xs text-muted-foreground font-text">
+                Type raw keystrokes directly into the agent's tmux session. Use this for answering tool prompts or typing commands — not for general communication (use Messages below instead).
+              </p>
+              <div class="flex gap-2">
+                <Input
+                  id="tmux-input"
+                  v-model="replyText"
+                  placeholder="Keystrokes to inject into tmux..."
+                  class="flex-1 font-text font-mono"
+                  @keydown="handleReplyKeydown"
+                />
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      :disabled="!replyText.trim()"
+                      aria-label="Send keystrokes to tmux session"
+                      @click="handleReply"
+                    >
+                      <Terminal class="size-4" /> Send
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Send this text as keystrokes to the agent's tmux session
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </section>
 
       <!-- Messages -->

@@ -263,6 +263,42 @@ async function handleSendMessageToAgent(agentName: string, text: string) {
   }
 }
 
+async function handleReplyToQuestion(agentName: string, questionIndex: number, questionText: string, replyText: string) {
+  if (!selectedSpace.value) return
+  try {
+    // 1. Send answer to tmux for immediate delivery
+    await api.replyToAgent(selectedSpace.value, agentName, replyText)
+    // 2. Send as persistent message so agent sees it on next check-in
+    await api.sendMessage(selectedSpace.value, agentName, `Re: ${questionText}\n\n${replyText}`, 'Boss')
+    // 3. Dismiss the question
+    await api.dismissItem(selectedSpace.value, agentName, questionIndex, 'question')
+    // 4. Reload space data
+    await loadSpace(selectedSpace.value)
+    showStatus(`Reply sent to ${agentName} and question dismissed`)
+  } catch (err) {
+    console.error('Reply to question failed:', err)
+    showError('Failed to reply to question. Please try again.')
+  }
+}
+
+async function handleReplyToBlocker(agentName: string, blockerIndex: number, blockerText: string, replyText: string) {
+  if (!selectedSpace.value) return
+  try {
+    // 1. Send answer to tmux for immediate delivery
+    await api.replyToAgent(selectedSpace.value, agentName, replyText)
+    // 2. Send as persistent message so agent sees it on next check-in
+    await api.sendMessage(selectedSpace.value, agentName, `Re: [Blocker] ${blockerText}\n\n${replyText}`, 'Boss')
+    // 3. Dismiss the blocker
+    await api.dismissItem(selectedSpace.value, agentName, blockerIndex, 'blocker')
+    // 4. Reload space data
+    await loadSpace(selectedSpace.value)
+    showStatus(`Reply sent to ${agentName} and blocker dismissed`)
+  } catch (err) {
+    console.error('Reply to blocker failed:', err)
+    showError('Failed to reply to blocker. Please try again.')
+  }
+}
+
 // ── SSE event handlers ─────────────────────────────────────────────
 function pushLog(type: string, msg: string) {
   eventLogRef.value?.pushSSEEvent(type, msg)
@@ -487,6 +523,8 @@ onUnmounted(() => {
             @dismiss-question="handleDismissQuestion"
             @dismiss-blocker="handleDismissBlocker"
             @send-message="handleSendMessage"
+            @reply-to-question="handleReplyToQuestion"
+            @reply-to-blocker="handleReplyToBlocker"
           />
 
           <!-- Space overview -->

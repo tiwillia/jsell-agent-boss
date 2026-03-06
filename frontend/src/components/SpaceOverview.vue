@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Radio, Bell, Trash2, MessageSquare, SendHorizontal } from 'lucide-vue-next'
+import { Radio, Bell, Trash2, MessageSquare, SendHorizontal, HelpCircle, AlertTriangle, MessageSquareReply } from 'lucide-vue-next'
 import StatusBadge from './StatusBadge.vue'
 import InterruptTracker from './InterruptTracker.vue'
 
@@ -159,15 +159,85 @@ const inboxPending = computed(() => inboxRef.value?.pendingCount ?? 0)
               :key="name"
               role="listitem"
               tabindex="0"
-              class="group cursor-pointer transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+              class="group cursor-pointer transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 relative overflow-hidden"
+              :class="{
+                'border-l-4 border-l-amber-500': agent.questions?.length && !agent.blockers?.length,
+                'border-l-4 border-l-red-500': agent.blockers?.length,
+              }"
               :aria-label="`Agent ${name}, status: ${agent.status}${agent.summary ? ', ' + agent.summary : ''}`"
               @click="emit('select-agent', name)"
               @keydown="handleCardKeydown($event, name)"
             >
+              <!-- Attention banner for questions/blockers -->
+              <div
+                v-if="agent.questions?.length || agent.blockers?.length"
+                class="px-4 pt-3 pb-0 space-y-1.5"
+                @click.stop
+              >
+                <!-- Blocker banner -->
+                <div
+                  v-if="agent.blockers?.length"
+                  class="flex items-start gap-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2"
+                >
+                  <AlertTriangle class="size-4 text-red-500 shrink-0 mt-0.5" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-red-600 dark:text-red-400">
+                      {{ agent.blockers.length }} Blocker{{ agent.blockers.length !== 1 ? 's' : '' }}
+                    </p>
+                    <p class="text-xs text-red-600/80 dark:text-red-400/80 font-text line-clamp-1 mt-0.5">
+                      {{ agent.blockers[0] }}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-6 px-2 text-[10px] border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 shrink-0"
+                    @click.stop="emit('select-agent', name)"
+                  >
+                    <MessageSquareReply class="size-3" /> Reply
+                  </Button>
+                </div>
+                <!-- Question banner -->
+                <div
+                  v-if="agent.questions?.length"
+                  class="flex items-start gap-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2"
+                >
+                  <HelpCircle class="size-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      {{ agent.questions.length }} Question{{ agent.questions.length !== 1 ? 's' : '' }}
+                    </p>
+                    <p class="text-xs text-amber-600/80 dark:text-amber-400/80 font-text line-clamp-1 mt-0.5">
+                      {{ agent.questions[0] }}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-6 px-2 text-[10px] border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 shrink-0"
+                    @click.stop="emit('select-agent', name)"
+                  >
+                    <MessageSquareReply class="size-3" /> Reply
+                  </Button>
+                </div>
+              </div>
+
               <CardHeader class="pb-2">
                 <div class="flex items-center justify-between gap-2">
                   <CardTitle class="text-base truncate">{{ name }}</CardTitle>
-                  <StatusBadge :status="agent.status" />
+                  <div class="flex items-center gap-1.5">
+                    <StatusBadge :status="agent.status" />
+                    <Tooltip v-if="tmuxStatus?.[name]?.needs_approval">
+                      <TooltipTrigger as-child>
+                        <Badge variant="outline" class="border-primary/50 text-primary text-[10px] h-5 px-1.5">
+                          Approval
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Agent is waiting for tool approval
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent class="space-y-2">
@@ -199,47 +269,6 @@ const inboxPending = computed(() => inboxRef.value?.pendingCount ?? 0)
                       {{ formatFullDate(agent.updated_at) }}
                     </TooltipContent>
                   </Tooltip>
-                  <div class="flex items-center gap-1.5">
-                    <Tooltip v-if="agent.questions?.length">
-                      <TooltipTrigger as-child>
-                        <span
-                          class="text-primary font-medium"
-                          :aria-label="`${agent.questions.length} open question${agent.questions.length !== 1 ? 's' : ''}`"
-                        >
-                          {{ agent.questions.length }}Q
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {{ agent.questions.length }} open question{{ agent.questions.length !== 1 ? 's' : '' }}
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-if="agent.blockers?.length">
-                      <TooltipTrigger as-child>
-                        <span
-                          class="text-destructive font-medium"
-                          :aria-label="`${agent.blockers.length} blocker${agent.blockers.length !== 1 ? 's' : ''}`"
-                        >
-                          {{ agent.blockers.length }}B
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {{ agent.blockers.length }} blocker{{ agent.blockers.length !== 1 ? 's' : '' }}
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-if="tmuxStatus?.[name]?.needs_approval">
-                      <TooltipTrigger as-child>
-                        <span
-                          class="text-primary font-semibold"
-                          aria-label="Needs approval"
-                        >
-                          !
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        Agent is waiting for tool approval
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
                 </div>
               </CardContent>
 
