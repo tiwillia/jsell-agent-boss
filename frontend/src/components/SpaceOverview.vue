@@ -101,9 +101,7 @@ function handleCardKeydown(e: KeyboardEvent, name: string) {
 }
 
 const sortedAgents = computed(() => {
-  return Object.entries(props.space.agents).sort(([, a], [, b]) => {
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-  })
+  return Object.entries(props.space.agents).sort(([a], [b]) => a.localeCompare(b))
 })
 
 const agentCount = computed(() => Object.keys(props.space.agents).length)

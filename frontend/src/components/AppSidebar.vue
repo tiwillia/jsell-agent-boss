@@ -57,9 +57,7 @@ const sortedSpaces = computed(() => {
 
 const sortedAgents = computed(() => {
   if (!props.currentSpace) return []
-  return Object.entries(props.currentSpace.agents).sort(([, a], [, b]) => {
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-  })
+  return Object.entries(props.currentSpace.agents).sort(([a], [b]) => a.localeCompare(b))
 })
 
 // Attention count: use server-provided value, but for the selected space
