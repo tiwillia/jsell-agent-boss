@@ -81,11 +81,70 @@ Things that degrade context warmth:
 
 ## Quick Start
 
+### Native Setup
+
 ```bash
 go build -o boss ./cmd/boss/
 DATA_DIR=./data ./boss serve
 open http://localhost:8899
 ```
+
+### Paude (Secure Container) Setup
+
+For secure multi-agent coordination with minimal human interrupts:
+
+```bash
+# 1. Build Paude base image (first time only)
+git clone https://github.com/bbrowning/paude.git
+cd paude && podman build -t localhost/paude-proxy-centos9:latest .
+
+# 2. Build integrated Claude Code image
+./scripts/build-paude-claude.sh
+
+# 3. Start Agent Boss server
+DATA_DIR=./data ./boss serve
+
+# 4. Boot all agents in secure containers
+./scripts/boot-paude-workspace.sh sdk-backend-replacement
+
+# 5. Monitor and manage agents
+./scripts/boot-paude-workspace.sh status
+./scripts/boot-paude-workspace.sh connect API
+```
+
+**Paude Benefits:**
+- 🔒 **Network-filtered security**: Agents can't exfiltrate data even with dangerous tools
+- ⚡ **YOLO mode**: `--privileged` containers with minimal human interrupts  
+- 🤖 **Auto-coordination**: Agents register with Boss and get ignition context automatically
+- 🔄 **Crash recovery**: Containers restart and re-ignite from blackboard state
+- 📡 **Full integration**: Tmux sessions + HTTP API + git commit hooks preserved
+- 🎯 **Role-based focus**: Each agent gets specific source file assignments
+
+**Paude Commands:**
+```bash
+# Build and deployment
+./scripts/build-paude-claude.sh                  # Build integrated image
+./scripts/boot-paude-workspace.sh start          # Start all agents
+./scripts/boot-paude-workspace.sh stop           # Stop all agents  
+
+# Agent management  
+./scripts/boot-paude-workspace.sh status         # Container + Boss status
+./scripts/boot-paude-workspace.sh connect API    # Interactive shell access
+./scripts/boot-paude-workspace.sh restart CP     # Restart crashed agent
+./scripts/boot-paude-workspace.sh test           # Test broadcast feature
+
+# Advanced usage
+./scripts/boot-paude-workspace.sh my-workspace   # Custom workspace
+podman logs paude-workspace-agent                # Debug container logs
+```
+
+**Integration Details:**
+- **Image**: `localhost/paude-claude:latest` (Paude + Claude Code + coordination)
+- **Agents**: API, SDK, CLI, CP, FE, BE, Cluster, Overlord, Reviewer, Paude
+- **Auto-features**: Boss registration, ignition context, git commit notifications
+- **Security**: Network filtering, container isolation, safe dangerous tools
+
+See [docs/paude.md](docs/paude.md) for complete integration guide and [docs/paude2.md](docs/paude2.md) for architecture details.
 
 ## API Reference
 
