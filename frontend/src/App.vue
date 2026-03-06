@@ -266,15 +266,15 @@ async function handleSendMessageToAgent(agentName: string, text: string) {
 async function handleReplyToQuestion(agentName: string, questionIndex: number, questionText: string, replyText: string) {
   if (!selectedSpace.value) return
   try {
-    // 1. Send answer to tmux for immediate delivery
-    await api.replyToAgent(selectedSpace.value, agentName, replyText)
-    // 2. Send as persistent message so agent sees it on next check-in
+    // 1. Send as persistent message so agent sees it on next check-in
     await api.sendMessage(selectedSpace.value, agentName, `Re: ${questionText}\n\n${replyText}`, 'Boss')
-    // 3. Dismiss the question
+    // 2. Dismiss the question
     await api.dismissItem(selectedSpace.value, agentName, questionIndex, 'question')
+    // 3. Nudge the agent to trigger a check-in so they read the message
+    await api.broadcastAgent(selectedSpace.value, agentName)
     // 4. Reload space data
     await loadSpace(selectedSpace.value)
-    showStatus(`Reply sent to ${agentName} and question dismissed`)
+    showStatus(`Reply sent to ${agentName} — nudge triggered`)
   } catch (err) {
     console.error('Reply to question failed:', err)
     showError('Failed to reply to question. Please try again.')
@@ -284,15 +284,15 @@ async function handleReplyToQuestion(agentName: string, questionIndex: number, q
 async function handleReplyToBlocker(agentName: string, blockerIndex: number, blockerText: string, replyText: string) {
   if (!selectedSpace.value) return
   try {
-    // 1. Send answer to tmux for immediate delivery
-    await api.replyToAgent(selectedSpace.value, agentName, replyText)
-    // 2. Send as persistent message so agent sees it on next check-in
+    // 1. Send as persistent message so agent sees it on next check-in
     await api.sendMessage(selectedSpace.value, agentName, `Re: [Blocker] ${blockerText}\n\n${replyText}`, 'Boss')
-    // 3. Dismiss the blocker
+    // 2. Dismiss the blocker
     await api.dismissItem(selectedSpace.value, agentName, blockerIndex, 'blocker')
+    // 3. Nudge the agent to trigger a check-in so they read the message
+    await api.broadcastAgent(selectedSpace.value, agentName)
     // 4. Reload space data
     await loadSpace(selectedSpace.value)
-    showStatus(`Reply sent to ${agentName} and blocker dismissed`)
+    showStatus(`Reply sent to ${agentName} — nudge triggered`)
   } catch (err) {
     console.error('Reply to blocker failed:', err)
     showError('Failed to reply to blocker. Please try again.')

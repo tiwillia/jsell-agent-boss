@@ -242,7 +242,7 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
               :key="name"
               role="listitem"
               tabindex="0"
-              class="group cursor-pointer transition-all duration-150 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 relative flex flex-col min-h-[180px]"
+              class="group cursor-pointer transition-all duration-150 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 relative flex flex-col"
               :class="[
                 agent.blockers?.length
                   ? 'border-l-4 border-l-red-500 shadow-md shadow-red-500/5'
@@ -255,40 +255,34 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
               @click="emit('select-agent', name)"
               @keydown="handleCardKeydown($event, name)"
             >
-              <CardContent class="flex flex-col flex-1 p-4 gap-3">
-                <!-- Row 1: Header — Avatar + Name + Status -->
+              <CardContent class="flex flex-col flex-1 p-4 gap-2">
+                <!-- Row 1: Header — Avatar with status overlay + Name + StatusBadge -->
                 <div class="flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2.5 min-w-0">
-                    <AgentAvatar :name="name" :size="28" />
-                    <span class="text-base font-semibold truncate">{{ name }}</span>
-                  </div>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    <!-- Freshness indicator -->
                     <Tooltip>
                       <TooltipTrigger as-child>
-                        <span
-                          class="relative inline-flex size-2.5 shrink-0"
-                          :aria-label="`Last updated ${relativeTime(agent.updated_at)}`"
-                        >
+                        <span class="relative inline-block shrink-0">
+                          <AgentAvatar :name="name" :size="28" />
+                          <!-- Freshness dot overlaid on bottom-right of avatar -->
                           <span
-                            v-if="freshness(agent.updated_at) === 'live'"
-                            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"
-                          />
-                          <span
-                            class="relative inline-flex size-2.5 rounded-full"
+                            class="absolute -bottom-0.5 -right-0.5 block size-2.5 rounded-full ring-2 ring-card"
                             :class="{
-                              'bg-green-500': freshness(agent.updated_at) === 'live',
-                              'bg-green-500/70': freshness(agent.updated_at) === 'recent',
+                              'bg-green-500': freshness(agent.updated_at) === 'live' || freshness(agent.updated_at) === 'recent',
                               'bg-muted-foreground/40': freshness(agent.updated_at) === 'normal',
                               'bg-muted-foreground/20': freshness(agent.updated_at) === 'stale',
                             }"
                           />
+                          <span
+                            v-if="freshness(agent.updated_at) === 'live'"
+                            class="absolute -bottom-0.5 -right-0.5 block size-2.5 rounded-full bg-green-400 animate-ping"
+                          />
                         </span>
                       </TooltipTrigger>
-                      <TooltipContent>
-                        Updated {{ relativeTime(agent.updated_at) }} — {{ formatFullDate(agent.updated_at) }}
-                      </TooltipContent>
+                      <TooltipContent>Updated {{ relativeTime(agent.updated_at) }}</TooltipContent>
                     </Tooltip>
+                    <span class="text-base font-semibold truncate">{{ name }}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0">
                     <StatusBadge :status="agent.status" />
                     <Tooltip v-if="tmuxStatus?.[name]?.needs_approval">
                       <TooltipTrigger as-child>
@@ -307,12 +301,12 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                 </div>
 
                 <!-- Row 2: Summary — THE HERO -->
-                <p class="text-sm font-text text-foreground/90 leading-relaxed line-clamp-4 flex-1">
+                <p class="text-sm font-text text-foreground/90 leading-relaxed line-clamp-4">
                   {{ agent.summary || 'No summary available' }}
                 </p>
 
-                <!-- Row 3: Metadata — compact, muted -->
-                <div class="flex items-center gap-2 text-[11px] text-muted-foreground font-text flex-wrap">
+                <!-- Row 3: Metadata — compact, one line -->
+                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground font-text">
                   <span v-if="agent.phase" class="truncate max-w-[100px]" :title="`Phase: ${agent.phase}`">
                     {{ agent.phase }}
                   </span>
@@ -341,10 +335,16 @@ function hasAttention(agent: { questions?: string[]; blockers?: string[] }): boo
                     <ExternalLink class="size-3" />
                     PR
                   </a>
-                  <span class="ml-auto inline-flex items-center gap-1 shrink-0">
-                    <Clock class="size-3" />
-                    {{ relativeTime(agent.updated_at) }}
-                  </span>
+                  <span v-if="agent.branch || agent.phase || agent.pr" class="text-border">·</span>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <span class="inline-flex items-center gap-1 cursor-default">
+                        <Clock class="size-3" />
+                        {{ relativeTime(agent.updated_at) }}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ formatFullDate(agent.updated_at) }}</TooltipContent>
+                  </Tooltip>
                 </div>
 
                 <!-- Row 4: Attention banner (only if questions/blockers) -->
