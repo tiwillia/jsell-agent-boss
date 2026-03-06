@@ -704,12 +704,30 @@ onUnmounted(() => {
               >
                 {{ selectedSpace }}
               </button>
-              <template v-if="selectedAgent">
+              <template v-if="selectedAgent && !showConversations">
                 <span class="text-muted-foreground">/</span>
                 <span class="text-foreground font-medium" aria-current="page">{{ selectedAgent }}</span>
               </template>
             </template>
           </nav>
+          <!-- Space view tabs (Overview / Conversations) -->
+          <template v-if="selectedSpace && !selectedAgentData">
+            <Separator orientation="vertical" class="h-5 mx-1" />
+            <nav class="flex items-center gap-1" aria-label="Space views">
+              <button
+                class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+                :class="showConversations ? 'text-muted-foreground hover:text-foreground hover:bg-muted' : 'bg-muted text-foreground'"
+                :aria-current="!showConversations ? 'page' : undefined"
+                @click="router.push('/' + selectedSpace)"
+              >Overview</button>
+              <button
+                class="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+                :class="showConversations ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+                :aria-current="showConversations ? 'page' : undefined"
+                @click="router.push('/' + selectedSpace + '/conversations')"
+              >Conversations</button>
+            </nav>
+          </template>
           <!-- SSE connection indicator + theme toggle -->
           <div class="ml-auto flex items-center gap-3">
             <span
@@ -802,6 +820,12 @@ onUnmounted(() => {
             </div>
             <p class="text-sm">Loading {{ selectedSpace }}…</p>
           </div>
+
+          <!-- Conversations view -->
+          <ConversationsView
+            v-else-if="showConversations && currentSpace"
+            :space="currentSpace"
+          />
 
           <!-- Agent detail view -->
           <AgentDetail
