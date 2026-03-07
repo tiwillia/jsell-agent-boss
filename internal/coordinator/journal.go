@@ -114,7 +114,7 @@ func (j *EventJournal) LoadSince(space string, since time.Time) ([]SpaceEvent, e
 
 	var events []SpaceEvent
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -194,8 +194,26 @@ func (j *EventJournal) ReplayInto(space string) (*KnowledgeSpace, error) {
 				ks.Agents[ev.Agent] = agent
 			}
 			agent.Messages = append(agent.Messages, msg)
-			if len(agent.Messages) > 50 {
-				agent.Messages = agent.Messages[len(agent.Messages)-50:]
+			// Retain all unread messages; cap read messages at 50.
+			const maxReadMessages = 50
+			readCount := 0
+			for _, m := range agent.Messages {
+				if m.Read {
+					readCount++
+				}
+			}
+			if readCount > maxReadMessages {
+				toSkip := readCount - maxReadMessages
+				skipped := 0
+				filtered := make([]AgentMessage, 0, len(agent.Messages))
+				for _, m := range agent.Messages {
+					if m.Read && skipped < toSkip {
+						skipped++
+						continue
+					}
+					filtered = append(filtered, m)
+				}
+				agent.Messages = filtered
 			}
 
 		case EventMessageAcked:

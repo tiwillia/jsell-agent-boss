@@ -1279,15 +1279,15 @@ func TestMessageLimit(t *testing.T) {
 		}
 	}
 
-	// Verify only last 50 are retained
+	// All 55 unread messages must be retained (unread messages are never dropped).
 	code, body := getBody(t, base+"/spaces/limit-test/agent/worker")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
 	var agent AgentUpdate
 	json.Unmarshal([]byte(body), &agent)
-	if len(agent.Messages) != 50 {
-		t.Errorf("expected 50 messages (capped), got %d", len(agent.Messages))
+	if len(agent.Messages) != 55 {
+		t.Errorf("expected 55 unread messages (all retained), got %d", len(agent.Messages))
 	}
 }
 

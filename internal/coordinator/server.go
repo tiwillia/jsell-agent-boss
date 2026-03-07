@@ -990,9 +990,27 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, spac
 	}
 	agent.Messages = append(agent.Messages, messageReq)
 
-	// Limit message history to last 50 messages
-	if len(agent.Messages) > 50 {
-		agent.Messages = agent.Messages[len(agent.Messages)-50:]
+	// Retain all unread messages; cap read messages at 50 to prevent
+	// unbounded growth without silently dropping directive messages.
+	const maxReadMessages = 50
+	readCount := 0
+	for _, m := range agent.Messages {
+		if m.Read {
+			readCount++
+		}
+	}
+	if readCount > maxReadMessages {
+		toSkip := readCount - maxReadMessages
+		skipped := 0
+		filtered := make([]AgentMessage, 0, len(agent.Messages))
+		for _, m := range agent.Messages {
+			if m.Read && skipped < toSkip {
+				skipped++
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		agent.Messages = filtered
 	}
 
 	ks.UpdatedAt = time.Now().UTC()
@@ -2012,10 +2030,11 @@ func (s *Server) handleMessageAck(w http.ResponseWriter, r *http.Request, spaceN
 		return
 	}
 
-	canonical := resolveAgentName(ks, agentName)
 	now := time.Now().UTC()
 
 	s.mu.Lock()
+	// resolveAgentName iterates ks.Agents — must hold s.mu to avoid data race.
+	canonical := resolveAgentName(ks, agentName)
 	agent, exists := ks.Agents[canonical]
 	if !exists {
 		s.mu.Unlock()
@@ -2039,6 +2058,12 @@ func (s *Server) handleMessageAck(w http.ResponseWriter, r *http.Request, spaceN
 	}
 
 	ks.UpdatedAt = now
+	// Append to journal BEFORE saving JSON so that on crash the journal is the
+	// source of truth and the ack is not silently lost on replay.
+	s.journal.Append(spaceName, EventMessageAcked, canonical, map[string]any{
+		"message_id": msgID,
+		"acked_at":   now,
+	})
 	if err := s.saveSpace(ks); err != nil {
 		s.mu.Unlock()
 		http.Error(w, fmt.Sprintf("save: %v", err), http.StatusInternalServerError)
@@ -2046,10 +2071,6 @@ func (s *Server) handleMessageAck(w http.ResponseWriter, r *http.Request, spaceN
 	}
 	s.mu.Unlock()
 
-	s.journal.Append(spaceName, EventMessageAcked, canonical, map[string]any{
-		"message_id": msgID,
-		"acked_at":   now,
-	})
 	s.logEvent(fmt.Sprintf("[%s/%s] message %q acknowledged", spaceName, canonical, msgID))
 
 	w.Header().Set("Content-Type", "application/json")
@@ -2082,13 +2103,24 @@ func (s *Server) compactAllSpaces() {
 	s.mu.RUnlock()
 
 	for _, name := range names {
+		// Snapshot the space under RLock so Compact does not race with writers.
 		s.mu.RLock()
 		ks, ok := s.spaces[name]
+		var ksCopy *KnowledgeSpace
+		if ok {
+			b, err := json.Marshal(ks)
+			if err == nil {
+				var snap KnowledgeSpace
+				if json.Unmarshal(b, &snap) == nil {
+					ksCopy = &snap
+				}
+			}
+		}
 		s.mu.RUnlock()
-		if !ok {
+		if ksCopy == nil {
 			continue
 		}
-		if err := s.journal.Compact(name, ks); err != nil {
+		if err := s.journal.Compact(name, ksCopy); err != nil {
 			s.logEvent(fmt.Sprintf("compaction failed for %q: %v", name, err))
 		} else {
 			s.logEvent(fmt.Sprintf("compacted journal for %q", name))
