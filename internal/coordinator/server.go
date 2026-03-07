@@ -460,6 +460,8 @@ func (s *Server) handleSpaceRoute(w http.ResponseWriter, r *http.Request) {
 				s.handleAgentRestart(w, r, spaceName, agentName)
 			case "introspect":
 				s.handleAgentIntrospect(w, r, spaceName, agentName)
+			case "history":
+				s.handleAgentHistory(w, r, spaceName, agentName)
 			default:
 				// Handle document path: /spaces/{space}/agent/{agent}/{slug}
 				s.handleAgentDocument(w, r, spaceName, agentName, action)
@@ -484,6 +486,8 @@ func (s *Server) handleSpaceRoute(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.NotFound(w, r)
 		}
+	case "history":
+		s.handleSpaceHistory(w, r, spaceName)
 	case "ignition":
 		agentName := ""
 		if len(parts) == 3 {
@@ -805,6 +809,10 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 
 		s.logEvent(fmt.Sprintf("[%s/%s] %s: %s", spaceName, canonical, update.Status, update.Summary))
 		s.recordDecisionInterrupts(spaceName, canonical, &update)
+		snap := snapshotFromAgent(spaceName, canonical, &update)
+		if err := s.appendSnapshot(snap); err != nil {
+			s.logEvent(fmt.Sprintf("[%s/%s] warning: failed to append snapshot: %v", spaceName, canonical, err))
+		}
 		sseData, _ := json.Marshal(map[string]string{"space": spaceName, "agent": canonical, "status": string(update.Status), "summary": update.Summary})
 		s.broadcastSSE(spaceName, "agent_updated", string(sseData))
 		w.WriteHeader(http.StatusAccepted)
