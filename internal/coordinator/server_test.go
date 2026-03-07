@@ -706,9 +706,9 @@ func TestSpaceJSONViaAcceptHeader(t *testing.T) {
 	if len(ks.Agents) != 1 {
 		t.Errorf("expected 1 agent, got %d", len(ks.Agents))
 	}
-	agent, ok := ks.Agents["Api"]
+	agent, ok := ks.Agents["api"]
 	if !ok {
-		t.Fatal("agent 'Api' not found")
+		t.Fatal("agent 'api' not found")
 	}
 	if agent.Summary != "json view test" {
 		t.Errorf("summary = %q", agent.Summary)
@@ -873,8 +873,8 @@ func TestInterruptRecordedOnBossQuestion(t *testing.T) {
 	if intr.Type != InterruptDecision {
 		t.Errorf("type = %q, want %q", intr.Type, InterruptDecision)
 	}
-	if intr.Agent != "Fe" {
-		t.Errorf("agent = %q, want Fe", intr.Agent)
+	if intr.Agent != "FE" {
+		t.Errorf("agent = %q, want FE", intr.Agent)
 	}
 	if intr.Space != "int-test" {
 		t.Errorf("space = %q, want int-test", intr.Space)
@@ -918,8 +918,8 @@ func TestInterruptMetricsEndpoint(t *testing.T) {
 	if metrics.ByType["decision"] != 2 {
 		t.Errorf("by_type[decision] = %d, want 2", metrics.ByType["decision"])
 	}
-	if metrics.ByAgent["Api"] != 2 {
-		t.Errorf("by_agent[Api] = %d, want 2", metrics.ByAgent["Api"])
+	if metrics.ByAgent["API"] != 2 {
+		t.Errorf("by_agent[API] = %d, want 2", metrics.ByAgent["API"])
 	}
 }
 
@@ -1009,11 +1009,11 @@ func TestMultipleAgentsMultipleInterrupts(t *testing.T) {
 	if metrics.TotalInterrupts != 3 {
 		t.Errorf("total = %d, want 3", metrics.TotalInterrupts)
 	}
-	if metrics.ByAgent["Fe"] != 2 {
-		t.Errorf("by_agent[Fe] = %d, want 2", metrics.ByAgent["Fe"])
+	if metrics.ByAgent["FE"] != 2 {
+		t.Errorf("by_agent[FE] = %d, want 2", metrics.ByAgent["FE"])
 	}
-	if metrics.ByAgent["Cp"] != 1 {
-		t.Errorf("by_agent[Cp] = %d, want 1", metrics.ByAgent["Cp"])
+	if metrics.ByAgent["CP"] != 1 {
+		t.Errorf("by_agent[CP] = %d, want 1", metrics.ByAgent["CP"])
 	}
 }
 
@@ -1098,8 +1098,8 @@ func TestMessagePostEndpoint(t *testing.T) {
 	if result["status"] != "delivered" {
 		t.Errorf("expected status=delivered, got %v", result["status"])
 	}
-	if result["recipient"] != "Worker" {
-		t.Errorf("expected recipient=Worker, got %v", result["recipient"])
+	if result["recipient"] != "worker" {
+		t.Errorf("expected recipient=worker, got %v", result["recipient"])
 	}
 
 	// Verify message is retrievable via GET agent JSON

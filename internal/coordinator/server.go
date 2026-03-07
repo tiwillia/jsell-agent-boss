@@ -896,6 +896,12 @@ func (s *Server) handleSpaceAgent(w http.ResponseWriter, r *http.Request, spaceN
 		s.mu.Lock()
 		canonical := resolveAgentName(ks, agentName)
 
+		// Canonicalize parent name under lock so resolveAgentName sees current agents.
+		if incomingParent != "" {
+			incomingParent = resolveAgentName(ks, incomingParent)
+			update.Parent = incomingParent
+		}
+
 		// Cycle detection: must be atomic with the write inside this lock.
 		if incomingParent != "" && hasCycle(ks, canonical, incomingParent) {
 			s.mu.Unlock()
@@ -2113,7 +2119,7 @@ func resolveAgentName(ks *KnowledgeSpace, raw string) string {
 			return existing
 		}
 	}
-	return strings.ToUpper(raw[:1]) + strings.ToLower(raw[1:])
+	return raw
 }
 
 var devNullPattern = regexp.MustCompile(`\s*<\s*/dev/null\s*`)
