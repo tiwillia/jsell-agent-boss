@@ -93,7 +93,8 @@ type AgentUpdate struct {
 	NextSteps      string          `json:"next_steps,omitempty"`
 	FreeText       string          `json:"free_text,omitempty"`
 	Documents      []AgentDocument `json:"documents,omitempty"`
-	TmuxSession    string          `json:"tmux_session,omitempty"`
+	SessionID      string          `json:"session_id,omitempty"`
+	BackendType    string          `json:"backend_type,omitempty"`
 	RepoURL        string          `json:"repo_url,omitempty"`
 	Messages       []AgentMessage      `json:"messages,omitempty"`
 	Notifications  []AgentNotification `json:"notifications,omitempty"`
