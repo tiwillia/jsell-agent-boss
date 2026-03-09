@@ -11,6 +11,7 @@ package db
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	glebarez "github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
@@ -88,15 +89,18 @@ func migrate(db *gorm.DB) error {
 	)
 }
 
-// migrateTasksCompositeKey recreates the tasks table with a composite primary
-// key (space_name, id) if it currently has a single-column PK on id only.
-// This fixes cross-space task ID collisions: tasks with the same sequence
-// number (e.g. TASK-001) in different spaces were overwriting each other.
+// migrateTasksTable ensures the tasks table has:
+//  1. A composite primary key (space_name, id) — fixes cross-space collisions.
+//  2. Backtick-quoted column names in the DDL — required so GORM's SQLite
+//     schema parser can recognise every column during later AutoMigrate runs.
 //
-// SQLite does not support ALTER TABLE … DROP PRIMARY KEY, so we use the
-// standard SQLite table-recreation pattern: create new → copy → drop → rename.
-// The migration is idempotent: if the table already has the correct schema
-// (detected by checking the primary key pragma), it is a no-op.
+// SQLite stores the original CREATE TABLE text in sqlite_master. If that DDL
+// uses unquoted column names (from an earlier raw-SQL migration), GORM fails
+// to parse some columns and omits them during table-recreation migrations,
+// leading to NOT NULL constraint failures.
+//
+// The migration is idempotent: it checks the stored DDL and only recreates
+// the table when the schema needs fixing.
 func migrateTasksCompositeKey(db *gorm.DB) error {
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -104,76 +108,31 @@ func migrateTasksCompositeKey(db *gorm.DB) error {
 	}
 
 	// Check whether the tasks table exists at all. If not, AutoMigrate will
-	// create it fresh with the correct composite PK — nothing to do here.
+	// create it fresh with the correct schema — nothing to do here.
 	var tableCount int
 	row := sqlDB.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tasks'`)
 	if err := row.Scan(&tableCount); err != nil || tableCount == 0 {
 		return nil
 	}
 
-	// Inspect current primary key columns via the table_info pragma.
-	// SQLite returns pk>0 for primary-key columns; composite PKs have pk=1,2,...
-	rows, err := sqlDB.Query(`PRAGMA table_info(tasks)`)
-	if err != nil {
+	// Check if the DDL already uses backtick-quoted columns (GORM-compatible).
+	var ddl string
+	row = sqlDB.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'`)
+	if err := row.Scan(&ddl); err != nil {
 		return err
 	}
-	defer rows.Close()
-
-	type colInfo struct {
-		cid     int
-		name    string
-		typ     string
-		notnull int
-		dflt    interface{}
-		pk      int
-	}
-	var pkCols []string
-	for rows.Next() {
-		var c colInfo
-		if err := rows.Scan(&c.cid, &c.name, &c.typ, &c.notnull, &c.dflt, &c.pk); err != nil {
-			return err
-		}
-		if c.pk > 0 {
-			pkCols = append(pkCols, c.name)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// Already has composite PK — nothing to do.
-	if len(pkCols) == 2 {
+	// If the DDL contains backtick-quoted column names, it's already GORM-compatible.
+	if strings.Contains(ddl, "`id`") && strings.Contains(ddl, "`space_name`") {
 		return nil
 	}
 
-	// Single-column PK (old schema): recreate with composite (space_name, id).
-	_, err = sqlDB.Exec(`
-		CREATE TABLE IF NOT EXISTS tasks_new (
-			id            TEXT NOT NULL,
-			space_name    TEXT NOT NULL,
-			title         TEXT NOT NULL,
-			description   TEXT,
-			status        TEXT NOT NULL DEFAULT 'backlog',
-			priority      TEXT DEFAULT 'medium',
-			assigned_to   TEXT,
-			created_by    TEXT NOT NULL,
-			labels        TEXT,
-			parent_task   TEXT,
-			subtasks      TEXT,
-			linked_branch TEXT,
-			linked_pr     TEXT,
-			created_at    DATETIME,
-			updated_at    DATETIME,
-			due_at        DATETIME,
-			PRIMARY KEY (space_name, id)
-		);
-		INSERT OR IGNORE INTO tasks_new
-			SELECT id, space_name, title, description, status, priority,
-			       assigned_to, created_by, labels, parent_task, subtasks,
-			       linked_branch, linked_pr, created_at, updated_at, due_at
-			FROM tasks;
-		DROP TABLE tasks;
-		ALTER TABLE tasks_new RENAME TO tasks;
-	`)
+	// Recreate the table with GORM-compatible DDL (backtick-quoted columns,
+	// composite PK). Use the standard SQLite table-recreation pattern.
+	const recreateSQL = "CREATE TABLE `tasks_new` (`id` TEXT NOT NULL,`space_name` TEXT NOT NULL,`title` TEXT NOT NULL,`description` TEXT,`status` TEXT NOT NULL DEFAULT 'backlog',`priority` TEXT DEFAULT 'medium',`assigned_to` TEXT,`created_by` TEXT NOT NULL,`labels` TEXT,`parent_task` TEXT,`subtasks` TEXT,`linked_branch` TEXT,`linked_pr` TEXT,`created_at` DATETIME,`updated_at` DATETIME,`due_at` DATETIME,PRIMARY KEY (`space_name`,`id`));" +
+		"INSERT OR IGNORE INTO `tasks_new` SELECT `id`,`space_name`,`title`,`description`,`status`,`priority`,`assigned_to`,`created_by`,`labels`,`parent_task`,`subtasks`,`linked_branch`,`linked_pr`,`created_at`,`updated_at`,`due_at` FROM `tasks`;" +
+		"DROP TABLE `tasks`;" +
+		"ALTER TABLE `tasks_new` RENAME TO `tasks`;"
+
+	_, err = sqlDB.Exec(recreateSQL)
 	return err
 }
