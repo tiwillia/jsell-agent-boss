@@ -584,6 +584,10 @@ func (s *Server) handleIgnition(w http.ResponseWriter, r *http.Request, spaceNam
 	}
 
 	sessionID := r.URL.Query().Get("session_id")
+	// ## TODO - REMOVE ME — backward compat for agents still using ?tmux_session= ## TODO
+	if sessionID == "" {
+		sessionID = r.URL.Query().Get("tmux_session")
+	}
 	parentParam := r.URL.Query().Get("parent")
 	roleParam := r.URL.Query().Get("role")
 

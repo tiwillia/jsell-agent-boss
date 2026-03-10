@@ -95,6 +95,8 @@ type AgentUpdate struct {
 	Documents      []AgentDocument `json:"documents,omitempty"`
 	SessionID      string          `json:"session_id,omitempty"`
 	BackendType    string          `json:"backend_type,omitempty"`
+	// ## TODO - REMOVE ME — backward compat for agents still posting "tmux_session" ## TODO
+	DeprecatedTmuxSession string `json:"tmux_session,omitempty"`
 	RepoURL        string          `json:"repo_url,omitempty"`
 	Messages       []AgentMessage      `json:"messages,omitempty"`
 	Notifications  []AgentNotification `json:"notifications,omitempty"`
