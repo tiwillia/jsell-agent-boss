@@ -116,9 +116,18 @@ type TmuxCreateOpts struct {
 
 // AmbientCreateOpts holds Ambient-specific session creation options.
 type AmbientCreateOpts struct {
-	DisplayName string        `json:"display_name,omitempty"`
-	Model       string        `json:"model,omitempty"`
-	Repos       []SessionRepo `json:"repos,omitempty"`
+	DisplayName string            `json:"display_name,omitempty"`
+	Model       string            `json:"model,omitempty"`
+	Repos       []SessionRepo     `json:"repos,omitempty"`
+	Workflow    *WorkflowRef      `json:"workflow,omitempty"`    // override per-session workflow
+	EnvVars     map[string]string `json:"env_vars,omitempty"`   // per-session environment variables
+}
+
+// WorkflowRef identifies an ACP workflow by git repository location.
+type WorkflowRef struct {
+	GitURL string `json:"gitUrl"`
+	Branch string `json:"branch,omitempty"`
+	Path   string `json:"path,omitempty"`
 }
 
 // SessionRepo describes a repository to clone into an Ambient session.

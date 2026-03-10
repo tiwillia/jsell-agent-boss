@@ -26,6 +26,11 @@ type AmbientSessionBackend struct {
 	project    string // X-Ambient-Project header
 	httpClient *http.Client
 
+	workflowURL    string // default workflow git URL
+	workflowBranch string // default workflow branch
+	workflowPath   string // default workflow path within repo
+	coordinatorURL string // external coordinator URL for BOSS_URL env var
+
 	availMu     sync.Mutex
 	availCached bool
 	availAt     time.Time
@@ -33,10 +38,14 @@ type AmbientSessionBackend struct {
 
 // AmbientBackendConfig holds configuration for creating an AmbientSessionBackend.
 type AmbientBackendConfig struct {
-	APIURL        string
-	Token         string
-	Project       string
-	SkipTLSVerify bool
+	APIURL             string
+	Token              string
+	Project            string
+	SkipTLSVerify      bool
+	WorkflowURL        string // Git URL of workflow repo
+	WorkflowBranch     string // Branch (optional, defaults to main)
+	WorkflowPath       string // Path within repo to workflow dir
+	CoordinatorExternalURL string // e.g. "https://jsell-agent-boss.apps.okd1.timslab"
 }
 
 // NewAmbientSessionBackend creates an AmbientSessionBackend from the given config.
@@ -46,9 +55,13 @@ func NewAmbientSessionBackend(cfg AmbientBackendConfig) *AmbientSessionBackend {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 	return &AmbientSessionBackend{
-		apiURL:  strings.TrimRight(cfg.APIURL, "/"),
-		token:   cfg.Token,
-		project: cfg.Project,
+		apiURL:         strings.TrimRight(cfg.APIURL, "/"),
+		token:          cfg.Token,
+		project:        cfg.Project,
+		workflowURL:    cfg.WorkflowURL,
+		workflowBranch: cfg.WorkflowBranch,
+		workflowPath:   cfg.WorkflowPath,
+		coordinatorURL: cfg.CoordinatorExternalURL,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: transport,
@@ -166,6 +179,8 @@ func (b *AmbientSessionBackend) CreateSession(ctx context.Context, opts SessionC
 		"task": task,
 	}
 
+	// Determine workflow: per-session overrides backend default.
+	var wf *WorkflowRef
 	if ao, ok := opts.BackendOpts.(AmbientCreateOpts); ok {
 		if ao.DisplayName != "" {
 			body["display_name"] = ao.DisplayName
@@ -178,8 +193,47 @@ func (b *AmbientSessionBackend) CreateSession(ctx context.Context, opts SessionC
 		if len(ao.Repos) > 0 {
 			body["repos"] = ao.Repos
 		}
+		if ao.Workflow != nil {
+			wf = ao.Workflow
+		}
 	} else if opts.SessionID != "" {
 		body["display_name"] = opts.SessionID
+	}
+
+	// Apply workflow (per-session override > backend default).
+	if wf == nil && b.workflowURL != "" {
+		wf = &WorkflowRef{
+			GitURL: b.workflowURL,
+			Branch: b.workflowBranch,
+			Path:   b.workflowPath,
+		}
+	}
+	if wf != nil {
+		wfMap := map[string]string{"gitUrl": wf.GitURL}
+		if wf.Branch != "" {
+			wfMap["branch"] = wf.Branch
+		}
+		if wf.Path != "" {
+			wfMap["path"] = wf.Path
+		}
+		body["activeWorkflow"] = wfMap
+	}
+
+	// Build environment variables: backend defaults first, then per-session overrides.
+	envVars := make(map[string]string)
+	if b.coordinatorURL != "" {
+		envVars["BOSS_URL"] = b.coordinatorURL
+	}
+	if opts.SessionID != "" {
+		envVars["AGENT_NAME"] = opts.SessionID
+	}
+	if ao, ok := opts.BackendOpts.(AmbientCreateOpts); ok {
+		for k, v := range ao.EnvVars {
+			envVars[k] = v
+		}
+	}
+	if len(envVars) > 0 {
+		body["environmentVariables"] = envVars
 	}
 
 	resp, err := b.doRequest(ctx, http.MethodPost, "/sessions", body)
