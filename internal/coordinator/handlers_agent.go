@@ -1312,20 +1312,20 @@ func (s *Server) handleCreateAgents(w http.ResponseWriter, r *http.Request, spac
 	// Register the new agent in the space.
 	ks := s.getOrCreateSpace(spaceName)
 	s.mu.Lock()
-	agentKey := strings.ToLower(req.Name)
-	agent, exists := ks.Agents[agentKey]
+	canonical := resolveAgentName(ks, req.Name)
+	agent, exists := ks.Agents[canonical]
 	if !exists {
 		agent = &AgentUpdate{
 			Status:    StatusIdle,
 			Summary:   fmt.Sprintf("%s: spawned via %s backend", req.Name, backendName),
 			UpdatedAt: time.Now().UTC(),
 		}
-		ks.Agents[agentKey] = agent
+		ks.Agents[canonical] = agent
 	}
 	agent.SessionID = sessionID
 	agent.BackendType = backend.Name()
 	if req.Parent != "" && agent.Parent == "" {
-		agent.Parent = strings.ToLower(req.Parent)
+		agent.Parent = resolveAgentName(ks, req.Parent)
 		rebuildChildren(ks)
 	}
 	if req.Role != "" && agent.Role == "" {

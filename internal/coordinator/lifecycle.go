@@ -172,18 +172,15 @@ func (s *Server) handleAgentSpawn(w http.ResponseWriter, r *http.Request, spaceN
 	// Register session on the agent record
 	ks := s.getOrCreateSpace(spaceName)
 	s.mu.Lock()
-	agent, exists := ks.Agents[strings.ToLower(agentName)]
+	canonical := resolveAgentName(ks, agentName)
+	agent, exists := ks.Agents[canonical]
 	if !exists {
-		canonical := resolveAgentName(ks, agentName)
-		agent = ks.Agents[canonical]
-	}
-	if agent == nil {
 		agent = &AgentUpdate{
 			Status:    StatusIdle,
 			Summary:   fmt.Sprintf("%s: spawned", agentName),
 			UpdatedAt: time.Now().UTC(),
 		}
-		ks.Agents[agentName] = agent
+		ks.Agents[canonical] = agent
 	}
 	agent.SessionID = sessionID
 	agent.BackendType = backend.Name()
