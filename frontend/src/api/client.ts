@@ -240,7 +240,7 @@ class ApiClient {
       name: string
       work_dir?: string
       command?: string
-      backend?: 'tmux' | 'cloud'
+      backend?: 'tmux' | 'ambient'
       width?: number
       height?: number
       parent?: string

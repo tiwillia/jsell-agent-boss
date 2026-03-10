@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -917,21 +918,20 @@ func (s *Server) handleSpaceSessionStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.TmuxAutoDiscover(spaceName)
+	s.AutoDiscoverAll(spaceName)
 
 	s.mu.RLock()
 	type agentSession struct {
-		name    string
-		session string
+		name        string
+		session     string
+		backendType string
 	}
 	var pairs []agentSession
 	for name, agent := range ks.Agents {
-		pairs = append(pairs, agentSession{name: name, session: agent.SessionID})
+		pairs = append(pairs, agentSession{name: name, session: agent.SessionID, backendType: agent.BackendType})
 	}
 	s.mu.RUnlock()
 
-	backend := s.backends[s.defaultBackend]
-	available := backend.Available()
 	var results []agentSessionStatus
 	for i, p := range pairs {
 		st := agentSessionStatus{
@@ -939,21 +939,24 @@ func (s *Server) handleSpaceSessionStatus(w http.ResponseWriter, r *http.Request
 			Session:    p.session,
 			Registered: p.session != "",
 		}
-		if available && st.Registered {
-			st.Exists = backend.SessionExists(p.session)
-			if st.Exists {
-				st.Idle = backend.IsIdle(p.session)
-				if lines, err := backend.CaptureOutput(p.session, 1); err == nil && len(lines) > 0 {
-					st.LastLine = lines[0]
+		if st.Registered {
+			backend := s.backendByName(p.backendType)
+			if backend.Available() {
+				st.Exists = backend.SessionExists(p.session)
+				if st.Exists {
+					st.Idle = backend.IsIdle(p.session)
+					if lines, err := backend.CaptureOutput(p.session, 1); err == nil && len(lines) > 0 {
+						st.LastLine = lines[0]
+					}
+					approval := backend.CheckApproval(p.session)
+					st.NeedsApproval = approval.NeedsApproval
+					st.ToolName = approval.ToolName
+					st.PromptText = approval.PromptText
 				}
-				approval := backend.CheckApproval(p.session)
-				st.NeedsApproval = approval.NeedsApproval
-				st.ToolName = approval.ToolName
-				st.PromptText = approval.PromptText
 			}
 		}
 		results = append(results, st)
-		if available && i < len(pairs)-1 {
+		if i < len(pairs)-1 {
 			time.Sleep(300 * time.Millisecond)
 		}
 	}
@@ -1248,16 +1251,28 @@ func (s *Server) handleCreateAgents(w http.ResponseWriter, r *http.Request, spac
 		return
 	}
 
-	sessionName := tmuxDefaultSession(spaceName, req.Name)
-	sessionID, err := backend.CreateSession(r.Context(), SessionCreateOpts{
-		SessionID: sessionName,
-		Command:   req.Command,
-		BackendOpts: TmuxCreateOpts{
-			WorkDir: req.WorkDir,
-			Width:   req.Width,
-			Height:  req.Height,
-		},
-	})
+	var createOpts SessionCreateOpts
+	if backend.Name() == "ambient" {
+		createOpts = SessionCreateOpts{
+			Command: req.Command,
+			BackendOpts: AmbientCreateOpts{
+				DisplayName: req.Name,
+			},
+		}
+	} else {
+		sessionName := tmuxDefaultSession(spaceName, req.Name)
+		createOpts = SessionCreateOpts{
+			SessionID: sessionName,
+			Command:   req.Command,
+			BackendOpts: TmuxCreateOpts{
+				WorkDir: req.WorkDir,
+				Width:   req.Width,
+				Height:  req.Height,
+			},
+		}
+	}
+
+	sessionID, err := backend.CreateSession(r.Context(), createOpts)
 	if err != nil {
 		writeJSONError(w, fmt.Sprintf("spawn: %v", err), http.StatusInternalServerError)
 		return
@@ -1277,6 +1292,7 @@ func (s *Server) handleCreateAgents(w http.ResponseWriter, r *http.Request, spac
 		ks.Agents[agentKey] = agent
 	}
 	agent.SessionID = sessionID
+	agent.BackendType = backend.Name()
 	if req.Parent != "" && agent.Parent == "" {
 		agent.Parent = strings.ToLower(req.Parent)
 		rebuildChildren(ks)
@@ -1296,7 +1312,16 @@ func (s *Server) handleCreateAgents(w http.ResponseWriter, r *http.Request, spac
 
 	// Send ignite asynchronously after agent has time to initialize.
 	go func() {
-		time.Sleep(5 * time.Second)
+		if ab, ok := backend.(*AmbientSessionBackend); ok {
+			pollCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := ab.waitForRunning(pollCtx, sessionID, 60*time.Second); err != nil {
+				s.logEvent(fmt.Sprintf("[%s/%s] create: session did not reach running state: %v", spaceName, req.Name, err))
+				return
+			}
+		} else {
+			time.Sleep(5 * time.Second)
+		}
 		igniteCmd := fmt.Sprintf(`/boss.ignite "%s" "%s"`, req.Name, spaceName)
 		if err := backend.SendInput(sessionID, igniteCmd); err != nil {
 			s.logEvent(fmt.Sprintf("[%s/%s] create: ignite send failed: %v", spaceName, req.Name, err))

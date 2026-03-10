@@ -8,3 +8,5 @@ data:
   DATA_DIR: /data
   COORDINATOR_PORT: "8899"
   POSTGRESQL_DATABASE: boss
+  AMBIENT_API_URL: https://public-api-ambient-code.apps.okd1.timslab/v1
+  AMBIENT_SKIP_TLS_VERIFY: "true"

@@ -114,6 +114,19 @@ type TmuxCreateOpts struct {
 	Height  int    // terminal height (default 50)
 }
 
+// AmbientCreateOpts holds Ambient-specific session creation options.
+type AmbientCreateOpts struct {
+	DisplayName string        `json:"display_name,omitempty"`
+	Model       string        `json:"model,omitempty"`
+	Repos       []SessionRepo `json:"repos,omitempty"`
+}
+
+// SessionRepo describes a repository to clone into an Ambient session.
+type SessionRepo struct {
+	URL    string `json:"url"`
+	Branch string `json:"branch,omitempty"`
+}
+
 // ApprovalInfo describes a pending tool-use approval prompt.
 type ApprovalInfo struct {
 	NeedsApproval bool   `json:"needs_approval"`

@@ -82,7 +82,7 @@ func NewServer(port, dataDir string) *Server {
 			thresh = d
 		}
 	}
-	return &Server{
+	s := &Server{
 		port:               port,
 		dataDir:            dataDir,
 		spaces:             make(map[string]*KnowledgeSpace),
@@ -99,6 +99,21 @@ func NewServer(port, dataDir string) *Server {
 		backends:           map[string]SessionBackend{"tmux": NewTmuxSessionBackend()},
 		defaultBackend:     "tmux",
 	}
+
+	if apiURL := os.Getenv("AMBIENT_API_URL"); apiURL != "" {
+		skipTLS := os.Getenv("AMBIENT_SKIP_TLS_VERIFY") == "true"
+		s.backends["ambient"] = NewAmbientSessionBackend(AmbientBackendConfig{
+			APIURL:        apiURL,
+			Token:         os.Getenv("AMBIENT_TOKEN"),
+			Project:       os.Getenv("AMBIENT_PROJECT"),
+			SkipTLSVerify: skipTLS,
+		})
+		if !s.backends["tmux"].Available() {
+			s.defaultBackend = "ambient"
+		}
+	}
+
+	return s
 }
 
 // SetFrontendDir configures the server to serve a Vue SPA from the given

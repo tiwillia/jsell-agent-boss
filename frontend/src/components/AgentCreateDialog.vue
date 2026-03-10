@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { api } from '@/api/client'
 import {
   Dialog,
@@ -24,9 +24,11 @@ const emit = defineEmits<{
 
 const agentName = ref('')
 const workDir = ref('')
-const backend = ref<'tmux' | 'cloud'>('tmux')
+const backend = ref<'tmux' | 'ambient'>('tmux')
 const submitting = ref(false)
 const errorMsg = ref('')
+
+const isTmux = computed(() => backend.value === 'tmux')
 
 function reset() {
   agentName.value = ''
@@ -43,7 +45,7 @@ async function submit() {
   try {
     await api.createAgent(props.space, {
       name,
-      work_dir: workDir.value.trim() || undefined,
+      work_dir: isTmux.value ? (workDir.value.trim() || undefined) : undefined,
       backend: backend.value,
     })
     const created = name
@@ -82,22 +84,6 @@ async function submit() {
           />
         </div>
 
-        <!-- Working Directory -->
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Working Directory (optional)
-          </label>
-          <Input
-            v-model="workDir"
-            placeholder="e.g. /home/user/my-project"
-            autocomplete="off"
-            class="font-mono text-sm"
-          />
-          <p class="text-xs text-muted-foreground">
-            The agent's tmux session will <code>cd</code> to this directory before starting.
-          </p>
-        </div>
-
         <!-- Backend selector -->
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Backend</label>
@@ -114,19 +100,39 @@ async function submit() {
             >
               tmux
             </button>
-            <div class="relative flex-1" title="Cloud backend coming soon">
-              <button
-                type="button"
-                disabled
-                class="w-full rounded border border-border bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground cursor-not-allowed"
-              >
-                cloud
-              </button>
-              <span class="absolute -top-1.5 -right-1.5 rounded-full bg-muted px-1 text-[9px] text-muted-foreground font-medium leading-4">
-                soon
-              </span>
-            </div>
+            <button
+              type="button"
+              :class="[
+                'flex-1 rounded border px-3 py-1.5 text-sm transition-colors',
+                backend === 'ambient'
+                  ? 'border-primary bg-primary/10 text-primary font-medium'
+                  : 'border-border bg-background hover:bg-muted/50',
+              ]"
+              @click="backend = 'ambient'"
+            >
+              ambient
+            </button>
           </div>
+          <p class="text-xs text-muted-foreground">
+            <template v-if="isTmux">Local tmux session on the coordinator host.</template>
+            <template v-else>Remote Kubernetes pod via the Ambient Code Platform.</template>
+          </p>
+        </div>
+
+        <!-- Working Directory (tmux only) -->
+        <div v-if="isTmux" class="flex flex-col gap-1.5">
+          <label class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Working Directory (optional)
+          </label>
+          <Input
+            v-model="workDir"
+            placeholder="e.g. /home/user/my-project"
+            autocomplete="off"
+            class="font-mono text-sm"
+          />
+          <p class="text-xs text-muted-foreground">
+            The agent's tmux session will <code>cd</code> to this directory before starting.
+          </p>
         </div>
 
         <p v-if="errorMsg" class="text-xs text-destructive">{{ errorMsg }}</p>
