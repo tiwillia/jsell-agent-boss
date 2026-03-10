@@ -11,7 +11,24 @@ import type {
   Task,
   TaskStatus,
   TaskPriority,
+  Persona,
+  AgentConfig,
 } from '@/types'
+
+/**
+ * PR #86 changed `KnowledgeSpace.agents` from `map[string]*AgentUpdate` to
+ * `map[string]*AgentRecord{status, config}`. Normalize the response so
+ * all frontend components can keep accessing agents as plain AgentUpdate objects.
+ */
+function normalizeSpace(space: KnowledgeSpace): KnowledgeSpace {
+  if (!space.agents) return space
+  const normalized: Record<string, import('@/types').AgentUpdate> = {}
+  for (const [name, record] of Object.entries(space.agents)) {
+    const r = record as unknown as { status: import('@/types').AgentUpdate }
+    normalized[name] = r.status ?? (record as unknown as import('@/types').AgentUpdate)
+  }
+  return { ...space, agents: normalized }
+}
 
 class ApiClient {
   private baseUrl: string
@@ -46,7 +63,7 @@ class ApiClient {
   fetchSpace(space: string): Promise<KnowledgeSpace> {
     return this.request<KnowledgeSpace>(`/spaces/${encodeURIComponent(space)}/`, {
       headers: { Accept: 'application/json' },
-    })
+    }).then(normalizeSpace)
   }
 
   deleteSpace(space: string): Promise<void> {
@@ -400,6 +417,55 @@ class ApiClient {
         body: JSON.stringify(task),
       },
     )
+  }
+
+  // --------------- Agent Config ---------------
+
+  getAgentConfig(space: string, agent: string): Promise<AgentConfig> {
+    return this.request<AgentConfig>(
+      `/spaces/${encodeURIComponent(space)}/agent/${encodeURIComponent(agent)}/config`,
+    )
+  }
+
+  updateAgentConfig(space: string, agent: string, patch: Partial<AgentConfig>): Promise<AgentConfig> {
+    return this.request<AgentConfig>(
+      `/spaces/${encodeURIComponent(space)}/agent/${encodeURIComponent(agent)}/config`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+    )
+  }
+
+  // --------------- Personas ---------------
+
+  fetchPersonas(): Promise<Persona[]> {
+    return this.request<Persona[]>('/personas')
+  }
+
+  createPersona(persona: { name: string; description: string; prompt: string }): Promise<Persona> {
+    return this.request<Persona>('/personas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(persona),
+    })
+  }
+
+  getPersona(id: string): Promise<Persona> {
+    return this.request<Persona>(`/personas/${encodeURIComponent(id)}`)
+  }
+
+  updatePersona(id: string, patch: Partial<{ name: string; description: string; prompt: string }>): Promise<Persona> {
+    return this.request<Persona>(`/personas/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+  }
+
+  deletePersona(id: string): Promise<void> {
+    return this.requestVoid(`/personas/${encodeURIComponent(id)}`, { method: 'DELETE' })
   }
 }
 
