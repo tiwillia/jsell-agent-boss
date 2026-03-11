@@ -195,6 +195,8 @@ func (s *Server) Start() error {
 	}
 	s.repo = bossdb.New(gdb)
 
+	s.loadSettings() // load persisted settings before spaces
+
 	if err := s.loadAllSpaces(); err != nil {
 		return fmt.Errorf("load spaces: %w", err)
 	}
