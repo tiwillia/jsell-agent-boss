@@ -160,6 +160,29 @@ const sortedAgents = computed(() => {
 
 const agentCount = computed(() => Object.keys(props.space.agents).length)
 
+// Setup checklist: shown for new spaces (<24h old, <3 agents) until dismissed.
+const checklistDismissed = ref(
+  localStorage.getItem(`checklist-dismissed:${props.space.name}`) === '1'
+)
+function dismissChecklist() {
+  checklistDismissed.value = true
+  localStorage.setItem(`checklist-dismissed:${props.space.name}`, '1')
+}
+const isNewSpace = computed(() => {
+  const created = new Date(props.space.created_at).getTime()
+  return Date.now() - created < 24 * 60 * 60 * 1000
+})
+const showChecklist = computed(
+  () => isNewSpace.value && agentCount.value < 3 && !checklistDismissed.value
+)
+const hasAgent = computed(() => agentCount.value > 0)
+const hasAgentWithWorkDir = computed(() =>
+  Object.values(props.space.agents).some((a) => (a as any).work_dir)
+)
+const hasSpawnedSession = computed(() =>
+  Object.values(props.space.agents).some((a) => (a as any).session_id)
+)
+
 const inboxRef = ref<InstanceType<typeof InterruptTracker> | null>(null)
 
 const attentionCount = computed(() => {
@@ -394,6 +417,39 @@ const activeSections = computed(() => [
           class="pl-9"
           aria-label="Filter agents by name or summary"
         />
+      </div>
+
+      <!-- Setup checklist for new spaces -->
+      <div
+        v-if="showChecklist"
+        class="rounded-lg border border-border bg-muted/40 p-4 text-sm font-text"
+        role="region"
+        aria-label="Getting started checklist"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <p class="font-medium text-foreground mb-2">Getting started checklist</p>
+          <button
+            class="text-muted-foreground hover:text-foreground transition-colors text-xs shrink-0"
+            aria-label="Dismiss checklist"
+            @click="dismissChecklist"
+          >
+            Dismiss
+          </button>
+        </div>
+        <ul class="space-y-1.5 text-muted-foreground">
+          <li class="flex items-center gap-2">
+            <span :class="hasAgent ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'">{{ hasAgent ? '✓' : '○' }}</span>
+            Add your first agent
+          </li>
+          <li class="flex items-center gap-2">
+            <span :class="hasAgentWithWorkDir ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'">{{ hasAgentWithWorkDir ? '✓' : '○' }}</span>
+            Set a working directory for the agent
+          </li>
+          <li class="flex items-center gap-2">
+            <span :class="hasSpawnedSession ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'">{{ hasSpawnedSession ? '✓' : '○' }}</span>
+            Spawn the agent session
+          </li>
+        </ul>
       </div>
 
       <!-- Tabs: Agents / Inbox -->
@@ -796,10 +852,20 @@ const activeSections = computed(() => [
             <!-- Empty state -->
             <div
               v-if="agentCount === 0"
-              class="flex flex-col items-center justify-center py-16 text-muted-foreground font-text text-center"
+              class="flex flex-col items-center justify-center py-16 text-muted-foreground font-text text-center gap-3"
             >
-              <p class="text-lg">No agents in this space yet</p>
-              <p class="text-sm mt-1">Agents will appear here when they register via the API</p>
+              <div class="rounded-full bg-muted p-3.5">
+                <Plus class="size-6 opacity-50" aria-hidden="true" />
+              </div>
+              <div>
+                <p class="text-base font-medium text-foreground">No agents in this space</p>
+                <p class="text-sm mt-1">An agent is an AI session connected to this board.</p>
+                <p class="text-sm">Create an agent to get started, or spawn one from the CLI.</p>
+              </div>
+              <Button size="sm" @click="agentCreateDialogOpen = true">
+                <Plus class="size-4 mr-1" />
+                Add Agent
+              </Button>
             </div>
             <div
               v-else-if="filteredSortedAgents.length === 0"

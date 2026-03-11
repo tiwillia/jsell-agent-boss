@@ -26,7 +26,7 @@ import EventLog from '@/components/EventLog.vue'
 import ConversationsView from '@/components/ConversationsView.vue'
 import KanbanView from '@/components/KanbanView.vue'
 import PersonasView from '@/components/PersonasView.vue'
-import { Keyboard } from 'lucide-vue-next'
+import { Keyboard, Plus } from 'lucide-vue-next'
 import { useTheme } from '@/composables/useTheme'
 
 const { theme, toggle: toggleTheme } = useTheme()
@@ -54,6 +54,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // ── Component refs ──────────────────────────────────────────────────
 const spaceOverviewRef = ref<InstanceType<typeof SpaceOverview> | null>(null)
+const sidebarRef = ref<InstanceType<typeof AppSidebar> | null>(null)
 
 // ── Keyboard shortcut state ────────────────────────────────────────
 const showHelpOverlay = ref(false)
@@ -788,6 +789,7 @@ onUnmounted(() => {
     </router-view>
     <SidebarProvider>
       <AppSidebar
+        ref="sidebarRef"
         :spaces="spaces"
         :current-space="currentSpace"
         :selected-space="selectedSpace"
@@ -1011,9 +1013,13 @@ onUnmounted(() => {
             <div class="h-12 w-1 rounded-full bg-primary mb-4" aria-hidden="true" />
             <p class="text-lg font-sans font-semibold mb-1">Agent Boss</p>
             <p class="text-sm mb-4">Multi-agent coordination dashboard</p>
-            <p v-if="spaces.length === 0" class="text-sm">
-              No spaces found. Agents will create spaces automatically when they register.
-            </p>
+            <template v-if="spaces.length === 0">
+              <p class="text-sm mb-4">No spaces yet. Create one to start coordinating agents.</p>
+              <Button size="sm" @click="sidebarRef?.openNewSpaceDialog()">
+                <Plus class="size-4 mr-1" />
+                Create Space
+              </Button>
+            </template>
             <p v-else class="text-sm">
               Select a space from the sidebar to view agents.
             </p>

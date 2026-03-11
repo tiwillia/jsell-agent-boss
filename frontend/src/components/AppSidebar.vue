@@ -261,6 +261,11 @@ function submitNewSpace() {
   newSpaceDialogOpen.value = false
 }
 
+function openNewSpaceDialog() {
+  newSpaceDialogOpen.value = true
+}
+
+defineExpose({ openNewSpaceDialog })
 </script>
 
 <template>
