@@ -49,40 +49,29 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `boss — multi-agent coordination bus
+	fmt.Fprint(os.Stderr, `boss — multi-agent coordination bus
 
-Commands:
-  serve                     Start the coordinator server
-  init [space-name]         Create space and register MCP server with Claude
-  attach                    Attach to an agent's tmux session
-  post                      Post an agent status update
-  get                       Get agent state or space markdown
-  spaces                    List all spaces
-  delete                    Delete a space or agent
-  ignite                    Generate ignition prompt for an agent
-  broadcast                 Trigger boss.check broadcast for a space
+Usage:
+  boss <command> [flags]
 
-Examples:
-  boss serve
-  boss init MyProject
-  boss init MyProject --open
-  boss attach --space my-feature --agent api
-  boss post --space my-feature --agent api --status done --summary "shipped"
-  boss get --space my-feature --agent api
-  boss get --space my-feature --raw
-  boss spaces
-  boss delete --space my-feature
-  boss delete --space my-feature --agent api
-  boss ignite SDK sdk-backend-replacement
-  boss broadcast --space sdk-backend-replacement
+Server Commands:
+  serve         Start the coordinator HTTP server
+  init          Create a space and register the MCP server with Claude
 
-Environment:
-  BOSS_URL           Server URL (default: http://localhost:8899)
-  BOSS_API_TOKEN     Bearer token for authenticated requests (optional)
-  COORDINATOR_PORT   Server port (serve only, default: 8899)
-  COORDINATOR_HOST   Hostname used in agent-facing URLs (serve only, default: localhost)
-  DATA_DIR           Data directory (serve only, default: ./data)
-  FRONTEND_DIR       Vue frontend dist directory (serve only, optional)
+Client Commands:
+  post          Post an agent status update to a space
+  get           Get agent state or full space snapshot
+  spaces        List all spaces
+  attach        Attach to an agent's tmux session
+  delete        Delete a space or a single agent from a space
+  ignite        Print the ignition prompt for a new agent
+  broadcast     Send a boss.check broadcast to all agents in a space
+
+Use "boss <command> --help" for more information about a command.
+
+Environment (client commands):
+  BOSS_URL         Coordinator URL  (default: http://localhost:8899)
+  BOSS_API_TOKEN   Bearer token for authenticated requests (optional)
 `)
 }
 
