@@ -2,10 +2,12 @@ package coordinator
 
 import (
 	"crypto/hmac"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // corsOrigins caches the computed allowed-origins list (init on first use).
@@ -52,6 +54,55 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		next.ServeHTTP(w, r)
+	})
+}
+
+// responseRecorder wraps http.ResponseWriter to capture the HTTP status code
+// written by a handler. The status defaults to 200 (matching net/http behaviour
+// when Write is called without an explicit WriteHeader).
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rr *responseRecorder) WriteHeader(code int) {
+	rr.status = code
+	rr.ResponseWriter.WriteHeader(code)
+}
+
+// requestLoggingMiddleware logs every HTTP request as a DomainEvent after the
+// handler returns. 4xx responses are logged at warn level; 5xx at error level;
+// everything else at info. SSE endpoints are skipped — they are long-lived
+// connections whose log entry would appear only after the stream closes.
+func (s *Server) requestLoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip SSE streams — they block until the client disconnects.
+		if r.URL.Path == "/events" || strings.HasSuffix(r.URL.Path, "/events") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rr := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rr, r)
+		dur := time.Since(start)
+
+		level := LevelInfo
+		if rr.status >= 500 {
+			level = LevelError
+		} else if rr.status >= 400 {
+			level = LevelWarn
+		}
+		s.emit(DomainEvent{
+			Level:     level,
+			EventType: EventHTTPRequest,
+			Msg:       fmt.Sprintf("%s %s → %d (%s)", r.Method, r.URL.Path, rr.status, dur.Round(time.Millisecond)),
+			Fields: map[string]string{
+				"method":   r.Method,
+				"path":     r.URL.Path,
+				"status":   fmt.Sprintf("%d", rr.status),
+				"duration": dur.String(),
+			},
+		})
 	})
 }
 
