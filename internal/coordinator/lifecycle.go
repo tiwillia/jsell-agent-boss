@@ -399,6 +399,9 @@ func (s *Server) spawnAgentService(spaceName, agentName string, req spawnRequest
 	if retErr != nil {
 		return "", "", "", &lifecycleErr{StatusCode: http.StatusInternalServerError, Msg: fmt.Sprintf("create session: %v", retErr)}
 	}
+	if sessionID == "" {
+		return "", "", "", &lifecycleErr{StatusCode: http.StatusInternalServerError, Msg: fmt.Sprintf("backend returned empty session ID for agent %s", agentName)}
+	}
 
 	// Register session on the agent record.
 	ks := s.getOrCreateSpace(spaceName)
