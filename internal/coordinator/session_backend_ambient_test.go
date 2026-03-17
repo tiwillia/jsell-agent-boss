@@ -750,6 +750,61 @@ func TestValidLabelValue(t *testing.T) {
 	}
 }
 
+// --- Group 5: Negative / Contract Tests ---
+
+func TestAmbientCreateResponseMissingName(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(testSessionsPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "bad method", http.StatusMethodNotAllowed)
+			return
+		}
+		// Return empty object — no "name" field.
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{})
+	})
+	b, ts := newTestAmbientBackend(t, mux)
+	defer ts.Close()
+
+	id, err := b.CreateSession(context.Background(), SessionCreateOpts{
+		Command: "test",
+		BackendOpts: AmbientCreateOpts{
+			DisplayName: "agent1",
+			SpaceName:   "valid-space",
+		},
+	})
+	// Should return empty string but no error from the JSON decode itself.
+	// The caller (spawnAgentService) should detect the empty session ID.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "" {
+		t.Fatalf("expected empty session ID from missing name field, got %q", id)
+	}
+}
+
+func TestAmbientListResponseBareArray(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(testSessionsPath, func(w http.ResponseWriter, r *http.Request) {
+		// Return a bare array instead of {"items": [...]} — this is the wrong shape.
+		json.NewEncoder(w).Encode([]backendSessionCR{
+			backendCR("s1", "Running", "", nil),
+		})
+	})
+	b, ts := newTestAmbientBackend(t, mux)
+	defer ts.Close()
+
+	ids, err := b.ListSessions()
+	// A bare array cannot be decoded into backendSessionList (a struct).
+	// ListSessions should return an error (not panic).
+	if err == nil {
+		t.Fatalf("expected error for bare array response, got %d sessions", len(ids))
+	}
+	if !strings.Contains(err.Error(), "decode session list") {
+		t.Fatalf("expected decode error, got: %v", err)
+	}
+}
+
 func TestGenerateMsgID(t *testing.T) {
 	id := generateMsgID()
 	if len(id) != 32 { // 16 bytes = 32 hex chars
