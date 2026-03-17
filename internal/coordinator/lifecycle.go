@@ -370,6 +370,7 @@ func (s *Server) spawnAgentService(spaceName, agentName string, req spawnRequest
 			BackendOpts: AmbientCreateOpts{
 				DisplayName: agentName,
 				Repos:       spawnRepos,
+				SpaceName:   spaceName,
 				EnvVars: func() map[string]string {
 					if s.apiToken == "" {
 						return nil
@@ -613,6 +614,7 @@ func (s *Server) restartAgentService(spaceName, agentName string, req spawnReque
 			Command: command,
 			BackendOpts: AmbientCreateOpts{
 				DisplayName: canonical,
+				SpaceName:   spaceName,
 				EnvVars: func() map[string]string {
 					if s.apiToken == "" {
 						return nil
