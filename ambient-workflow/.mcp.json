@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "boss-mcp": {
+      "type": "http",
+      "url": "${BOSS_URL_SCHEME}://${BOSS_URL_HOST}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${BOSS_API_TOKEN}"
+      }
+    }
+  }
+}

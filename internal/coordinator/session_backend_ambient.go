@@ -31,6 +31,7 @@ type AmbientSessionBackend struct {
 	workflowBranch string // default workflow branch
 	workflowPath   string // default workflow path within repo
 	coordinatorURL string // external coordinator URL for BOSS_URL env var
+	skipTLSVerify  bool   // pass NODE_TLS_REJECT_UNAUTHORIZED=0 to runner pods
 
 	availMu     sync.Mutex
 	availCached bool
@@ -69,6 +70,7 @@ func NewAmbientSessionBackend(cfg AmbientBackendConfig) *AmbientSessionBackend {
 		workflowBranch: cfg.WorkflowBranch,
 		workflowPath:   cfg.WorkflowPath,
 		coordinatorURL: cfg.CoordinatorExternalURL,
+		skipTLSVerify:  cfg.SkipTLSVerify,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: transport,
@@ -205,8 +207,6 @@ func (b *AmbientSessionBackend) CreateSession(ctx context.Context, opts SessionC
 	}
 
 	// Build environment variables: backend defaults first, then per-session overrides.
-	// The backend API rejects env var values containing "://" (URL scheme),
-	// so we split URL values into _SCHEME + _HOST parts for reassembly by the agent.
 	envVars := make(map[string]string)
 	if b.coordinatorURL != "" {
 		splitEnvURL(envVars, "BOSS_URL", b.coordinatorURL)
@@ -223,8 +223,22 @@ func (b *AmbientSessionBackend) CreateSession(ctx context.Context, opts SessionC
 			}
 		}
 	}
+
+	// Register boss-mcp as a user-defined MCP server via MCP_SERVERS_JSON.
+	// The ACP runner's build_mcp_servers() reads this env var and merges
+	// HTTP servers into the Claude Agent SDK's MCP config.
+	if b.coordinatorURL != "" {
+		envVars["MCP_SERVERS_JSON"] = `[{"name":"boss-mcp","type":"http","url":"` + b.coordinatorURL + `/mcp"}]`
+		// The Node.js MCP HTTP transport rejects self-signed certs by default.
+		// When TLS verification is skipped for the ambient backend, propagate
+		// this to runner pods so the SDK can connect to the coordinator.
+		if b.skipTLSVerify {
+			envVars["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+		}
+	}
+
 	if len(envVars) > 0 {
-		body["envVars"] = envVars
+		body["environmentVariables"] = envVars
 	}
 
 	resp, err := b.doRequest(ctx, http.MethodPost, b.sessionsPath(), body)

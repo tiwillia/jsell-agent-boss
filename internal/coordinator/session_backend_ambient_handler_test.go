@@ -106,22 +106,6 @@ func (m *ambientAPIMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject "environmentVariables" — real backend only accepts "envVars".
-	if _, has := body["environmentVariables"]; has {
-		http.Error(w, `{"error":"unknown field: environmentVariables"}`, http.StatusBadRequest)
-		return
-	}
-
-	// Reject env var values containing "://" — real backend validation.
-	if envVars, ok := body["envVars"].(map[string]interface{}); ok {
-		for k, v := range envVars {
-			if vs, ok := v.(string); ok && strings.Contains(vs, "://") {
-				http.Error(w, fmt.Sprintf(`{"error":"envVars.%s: value contains disallowed '://'"}`, k), http.StatusBadRequest)
-				return
-			}
-		}
-	}
-
 	m.nextID++
 	name := fmt.Sprintf("session-%03d", m.nextID)
 
@@ -324,9 +308,9 @@ func TestHandlerAmbientSpawnEnvVarSplit(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	envVars, ok := capturedBody["envVars"].(map[string]interface{})
+	envVars, ok := capturedBody["environmentVariables"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected envVars in request body, got %v", capturedBody["envVars"])
+		t.Fatalf("expected environmentVariables in request body, got %v", capturedBody["environmentVariables"])
 	}
 
 	// BOSS_URL should have been split into BOSS_URL_SCHEME + BOSS_URL_HOST
@@ -338,6 +322,18 @@ func TestHandlerAmbientSpawnEnvVarSplit(t *testing.T) {
 	}
 	if envVars["BOSS_URL_HOST"] != "boss.example.com" {
 		t.Errorf("expected BOSS_URL_HOST=boss.example.com, got %v", envVars["BOSS_URL_HOST"])
+	}
+
+	// MCP_SERVERS_JSON should register boss-mcp as an HTTP MCP server
+	mcpJSON, ok := envVars["MCP_SERVERS_JSON"].(string)
+	if !ok || mcpJSON == "" {
+		t.Fatal("expected MCP_SERVERS_JSON in environmentVariables")
+	}
+	if !strings.Contains(mcpJSON, `"boss-mcp"`) {
+		t.Errorf("MCP_SERVERS_JSON should contain boss-mcp, got %v", mcpJSON)
+	}
+	if !strings.Contains(mcpJSON, "https://boss.example.com/mcp") {
+		t.Errorf("MCP_SERVERS_JSON should contain coordinator URL, got %v", mcpJSON)
 	}
 }
 
