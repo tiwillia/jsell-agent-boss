@@ -209,18 +209,14 @@ func (b *AmbientSessionBackend) CreateSession(ctx context.Context, opts SessionC
 	// Build environment variables: backend defaults first, then per-session overrides.
 	envVars := make(map[string]string)
 	if b.coordinatorURL != "" {
-		splitEnvURL(envVars, "BOSS_URL", b.coordinatorURL)
+		envVars["BOSS_URL"] = b.coordinatorURL
 	}
 	if opts.SessionID != "" {
 		envVars["AGENT_NAME"] = opts.SessionID
 	}
 	if ao, ok := opts.BackendOpts.(AmbientCreateOpts); ok {
 		for k, v := range ao.EnvVars {
-			if strings.Contains(v, "://") {
-				splitEnvURL(envVars, k, v)
-			} else {
-				envVars[k] = v
-			}
+			envVars[k] = v
 		}
 	}
 
